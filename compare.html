@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en-MU">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!--@head-->
+  <link rel="preload" href="/src/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/src/fonts/bodoni-moda-latin-500-italic.woff2" as="font" type="font/woff2" crossorigin />
+  <script type="module" src="/src/pages/compare.js" blocking="render"></script>
+</head>
+<body class="page-compare">
+  <a href="#main" class="skip-link">Skip to content</a>
+  <!--@nav:compare-->
+  <main id="main">
+    <section class="page-head wrap">
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="./">Home</a><span aria-hidden="true">/</span><a href="inventory.html">Catalogue</a><span aria-hidden="true">/</span><span aria-current="page">Compare</span></nav>
+      <h1 class="page-title" data-title>Compare cars <em>side by side</em></h1>
+      <p class="page-lede">Up to three cars. The best figure in each row is marked.</p>
+      <label class="toggle compare-diff"><input type="checkbox" data-diff /><span>Only show differences</span></label>
+    </section>
+    <section class="wrap compare" data-compare-root aria-live="polite">
+      <noscript><p class="page-lede">Comparing cars needs JavaScript. You can still <a class="link" href="inventory.html">browse every car</a>.</p></noscript>
+    </section>
+  </main>
+  <!--@footer-->
+  <!--@tabbar:compare-->
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en-MU">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!--@head-->
+  <link rel="preload" href="/src/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/src/fonts/bodoni-moda-latin-500-italic.woff2" as="font" type="font/woff2" crossorigin />
+  <script type="module" src="/src/pages/contact.js" blocking="render"></script>
+</head>
+<body class="page-contact page-fit">
+  <a href="#main" class="skip-link">Skip to content</a>
+  <!--@nav:contact-->
+  <main id="main">
+    <section class="page-head wrap">
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="./">Home</a><span aria-hidden="true">/</span><span aria-current="page">Visit us</span></nav>
+      <h1 class="page-title" data-title>Visit us in <em>Phoenix</em></h1>
+      <p class="page-lede">Find us at 24 Royal Road, or call first and we'll have the car you want ready.</p>
+    </section>
+
+    <section class="wrap contact-grid">
+      <div class="map-card">
+        <iframe title="Map showing WebLuxe Cars at 24 Royal Road, Phoenix" loading="lazy" referrerpolicy="no-referrer-when-downgrade"
+          src="https://maps.google.com/maps?q=Royal%20Road%2C%20Phoenix%2C%20Mauritius&z=15&output=embed"></iframe>
+        <div class="map-overlay">
+          <address>24 Royal Road, Phoenix, Mauritius</address>
+          <a class="btn btn-primary btn-sm" href="https://www.google.com/maps/dir/?api=1&destination=Royal%20Road%2C%20Phoenix%2C%20Mauritius" rel="noopener">Get directions</a>
+        </div>
+      </div>
+      <div class="contact-side">
+        <table class="hours" aria-label="Opening hours"><tbody><!--@hours--></tbody></table>
+        <div class="reach"><!--@reach--></div>
+      </div>
+    </section>
+
+    <!-- WebLuxe Cars' own "About Us" video, from their YouTube channel. It only loads when opened -->
+    <dialog class="video-box" data-about-box aria-label="WebLuxe Cars, About Us video">
+      <div class="video-frame video-frame--wide" data-about-frame></div>
+      <button type="button" class="lb-close" data-about-close aria-label="Close the video"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </dialog>
+  </main>
+  <!--@footer-->
+  <!--@tabbar:contact-->
+</body>
+</html>

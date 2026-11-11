@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en-MU">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!--@head-->
+  <link rel="preload" href="/src/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/src/fonts/bodoni-moda-latin-500-italic.woff2" as="font" type="font/woff2" crossorigin />
+  <script type="module" src="/src/pages/inventory.js" blocking="render"></script>
+</head>
+<body class="page-inventory">
+  <a href="#results" class="skip-link">Skip to results</a>
+  <!--@nav:inventory-->
+
+  <main id="main">
+
+    <div class="wrap inv-layout">
+      <aside class="inv-filters" data-filter-panel aria-label="Filters" data-lenis-prevent>
+        <div class="inv-filters-head">
+          <h2>Filters</h2>
+          <button type="button" class="link" data-reset>Reset all</button>
+          <button type="button" class="inv-filters-close" data-close-filters aria-label="Close filters"></button>
+        </div>
+        <form data-filters action="inventory.html" method="get">
+          <label class="field field-search">
+            <span class="sr-only">Search make or model</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+            <input type="search" name="q" placeholder="Search make or model" autocomplete="off" enterkeyhint="search" />
+          </label>
+
+          <fieldset class="fgroup">
+            <legend>Body type</legend>
+            <div class="body-grid"><!--@opts:body--></div>
+          </fieldset>
+
+          <fieldset class="fgroup">
+            <legend>Price <span class="range2-out tabular-nums" data-range-out="price">Any price</span></legend>
+            <div class="range2" data-range="price" data-step="50000">
+              <div class="range2-track"><span class="range2-fill"></span></div>
+              <input type="range" aria-label="Minimum price" data-lo />
+              <input type="range" aria-label="Maximum price" data-hi />
+            </div>
+          </fieldset>
+
+          <fieldset class="fgroup">
+            <legend>Year <span class="range2-out tabular-nums" data-range-out="year">Any year</span></legend>
+            <div class="range2" data-range="year" data-step="1">
+              <div class="range2-track"><span class="range2-fill"></span></div>
+              <input type="range" aria-label="Earliest year" data-lo />
+              <input type="range" aria-label="Latest year" data-hi />
+            </div>
+          </fieldset>
+
+          <fieldset class="fgroup">
+            <legend>Fuel</legend>
+            <div class="pill-row"><!--@opts:fuel--></div>
+          </fieldset>
+
+          <fieldset class="fgroup">
+            <legend>Gearbox</legend>
+            <div class="pill-row">
+              <label class="pill"><input type="checkbox" name="gearbox" value="Automatic" /><span>Automatic</span></label>
+              <label class="pill"><input type="checkbox" name="gearbox" value="Manual" /><span>Manual</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="fgroup fgroup--toggles">
+            <legend class="sr-only">More options</legend>
+            <label class="toggle"><input type="checkbox" name="saved" /><span>Saved only</span></label>
+          </fieldset>
+        </form>
+        <div class="inv-filters-apply"><button type="button" class="btn btn-primary" data-close-filters>Show <span class="tabular-nums" data-count-btn><!--@total--></span> cars</button></div>
+      </aside>
+
+      <section class="inv-results" id="results" aria-label="Results">
+        <div class="page-head">
+          <nav class="crumbs" aria-label="Breadcrumb"><a href="./">Home</a><span aria-hidden="true">/</span><span aria-current="page">Catalogue</span></nav>
+          <h1 class="page-title" data-title>Our <em>catalogue</em></h1>
+          <p class="page-lede"><span class="tabular-nums"><!--@total--></span> cars at 24 Royal Road, Phoenix, with our own photos of each one. New stock every week.</p>
+        </div>
+        <!-- the saved cars: send the whole list to the dealer in one tap -->
+        <div class="garage" data-garage hidden>
+          <div>
+            <h2 class="garage-title">Saved <em>cars</em></h2>
+            <p class="garage-sub" data-garage-sub></p>
+          </div>
+          <div class="garage-acts">
+            <a class="btn btn-primary" data-garage-send rel="noopener">Send to WebLuxe Cars on WhatsApp</a>
+          </div>
+        </div>
+        <div class="inv-toolbar">
+          <p class="inv-count" aria-live="polite"><strong class="tabular-nums" data-count><!--@total--></strong> <span data-count-word>cars</span></p>
+          <button type="button" class="btn btn-line btn-sm inv-open-filters" data-open-filters>Filters <span class="badge" data-active-n hidden></span></button>
+          <label class="field field-compact">
+            <span class="field-label">Sort by</span>
+            <select name="sort" data-sort>
+              <option value="new">Newest arrivals</option>
+              <option value="price-asc">Price: low to high</option>
+              <option value="price-desc">Price: high to low</option>
+              <option value="year">Year: newest first</option>
+              <option value="year-asc">Year: oldest first</option>
+            </select>
+          </label>
+          <div class="view-toggle" role="group" aria-label="Layout">
+            <button type="button" data-view="grid" aria-pressed="false" aria-label="Grid view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg></button>
+            <button type="button" data-view="list" aria-pressed="true" aria-label="List view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16"/></svg></button>
+          </div>
+        </div>
+        <div class="chips" data-chips role="group" aria-label="Active filters"></div>
+
+        <ul class="grid-cars" data-grid data-view="list"><!--@grid--></ul>
+
+        <div class="inv-more" data-more-wrap>
+          <p class="tabular-nums" data-showing></p>
+          <div class="inv-more-bar" aria-hidden="true"><span data-more-bar></span></div>
+          <button type="button" class="btn btn-line" data-more>Show more cars</button>
+        </div>
+
+        <!-- no dead end: when nothing matches, say what was asked for, offer to be told when one comes in, and a way back -->
+        <div class="empty" data-empty hidden>
+          <p class="empty-title" data-empty-title>Nothing matches that right now.</p>
+          <p>New stock comes in every week. Send us what you're after on WhatsApp and we'll message you when one arrives.</p>
+          <div class="empty-actions">
+            <a class="btn btn-primary" data-wa-alert rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 19.5l1.1-3.6A8 8 0 1 1 8.3 18.6l-3.8.9Z"/><path d="M9.2 8.6c.3-.6.6-.6.9-.6h.5c.2 0 .4 0 .6.5l.7 1.6c.1.2.1.4 0 .6l-.5.6c-.1.2-.2.4 0 .6.6 1 1.4 1.8 2.4 2.3.2.1.4.1.6-.1l.6-.7c.2-.2.4-.2.6-.1l1.6.8c.2.1.4.2.4.4 0 .3 0 1-.5 1.5-.5.5-1.6.9-2.6.6a9 9 0 0 1-5.1-4.5c-.6-1.3-.4-2.3.2-3.1Z"/></svg>Tell me when one arrives</a>
+            <button type="button" class="btn btn-line" data-reset>Clear all filters</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  </main>
+
+  <div class="tray" data-tray aria-live="polite" hidden>
+    <div class="tray-inner">
+      <p class="tray-label"><strong data-tray-n>0</strong> of 3 to compare</p>
+      <ul class="tray-cars" data-tray-cars></ul>
+      <button type="button" class="link" data-tray-clear>Clear</button>
+      <a href="compare.html" class="btn btn-primary btn-sm" data-tray-go>Compare</a>
+    </div>
+  </div>
+  <div class="scrim" data-scrim hidden></div>
+
+  <!--@footer-->
+  <!--@tabbar:inventory-->
+</body>
+</html>

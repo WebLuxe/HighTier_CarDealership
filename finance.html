@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en-MU">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!--@head-->
+  <link rel="preload" href="/src/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/src/fonts/bodoni-moda-latin-500-italic.woff2" as="font" type="font/woff2" crossorigin />
+  <script type="module" src="/src/pages/finance.js" blocking="render"></script>
+</head>
+<body class="page-finance page-fit">
+  <a href="#main" class="skip-link">Skip to content</a>
+  <!--@nav:finance-->
+  <main id="main">
+    <section class="page-head wrap">
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="./">Home</a><span aria-hidden="true">/</span><span aria-current="page">Leasing</span></nav>
+      <h1 class="page-title" data-title>Leasing <em>calculator</em></h1>
+      <p class="page-lede">Drive now, pay monthly. Leasing is arranged through Sample Leasing Co; work out a rough monthly figure here first.</p>
+    </section>
+
+    <section class="wrap finance-grid">
+      <div class="finance-intro">
+        <h2 class="section-title">Your <em>numbers</em></h2>
+        <p class="section-sub">An estimate at an example rate. Sample Leasing Co confirms the real rate and terms after approval.</p>
+        <label class="field">
+          <span class="field-label">Start from a car in stock</span>
+          <select data-fin-car><option value="">Choose a car</option></select>
+        </label>
+        <a class="fin-car" data-fin-car-card hidden></a>
+        <!--@shape:Sedan-->
+      </div>
+      <div class="calc">
+        <div class="calc-controls">
+          <label class="slider"><span class="slider-top"><span>Car price</span><output class="tabular-nums" data-out="price">Rs 725,000</output></span>
+            <input type="range" min="150000" max="2000000" step="1000" value="725000" data-fin="price" /></label>
+          <label class="slider"><span class="slider-top"><span>Deposit</span><output class="tabular-nums" data-out="deposit">20%</output></span>
+            <input type="range" min="10" max="60" step="5" value="20" data-fin="deposit" /></label>
+          <label class="slider"><span class="slider-top"><span>Interest rate</span><output class="tabular-nums" data-out="rate">7.5% a year</output></span>
+            <input type="range" min="4" max="14" step="0.1" value="7.5" data-fin="rate" /></label>
+          <fieldset class="terms"><legend>Term</legend><div class="term-row" data-terms></div></fieldset>
+        </div>
+        <div class="calc-result">
+          <p class="calc-figure tabular-nums" aria-live="polite"><span data-monthly>Rs 11,622</span></p>
+          <p class="calc-per">a month for <span data-term-label>60 months</span></p>
+          <div class="donut" aria-hidden="true">
+            <svg viewBox="0 0 42 42"><circle cx="21" cy="21" r="15.915" class="donut-bg"/><circle cx="21" cy="21" r="15.915" class="donut-seg donut-dep" data-donut="dep"/><circle cx="21" cy="21" r="15.915" class="donut-seg donut-loan" data-donut="loan"/><circle cx="21" cy="21" r="15.915" class="donut-seg donut-int" data-donut="int"/></svg>
+            <ul class="donut-key"><li><i class="k-dep"></i>Deposit</li><li><i class="k-loan"></i>Loan</li><li><i class="k-int"></i>Interest</li></ul>
+          </div>
+          <dl class="calc-break">
+            <div><dt>Loan amount</dt><dd class="tabular-nums" data-loan></dd></div>
+            <div><dt>Deposit</dt><dd class="tabular-nums" data-dep></dd></div>
+            <div><dt>Total interest</dt><dd class="tabular-nums" data-interest></dd></div>
+            <div><dt>Total you pay</dt><dd class="tabular-nums" data-total></dd></div>
+          </dl>
+          <a class="btn btn-primary btn-wide" data-fin-wa rel="noopener">Ask about leasing on WhatsApp</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+  <!--@footer-->
+  <!--@tabbar:finance-->
+</body>
+</html>

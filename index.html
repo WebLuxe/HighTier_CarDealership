@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en-MU">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!--@head-->
+  <link rel="preload" href="/src/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/src/fonts/bodoni-moda-latin-500-italic.woff2" as="font" type="font/woff2" crossorigin />
+  <script>
+    // The intro plays on every fresh load and every refresh, wherever it happened, but not when you arrive from
+    // another page on the site (the page transition covers that) or come back with the back button.
+    try {
+      // the live 3D car is for a computer with a mouse or trackpad that hasn't struggled with the effects before (src/lib/device.js);
+      // phones, tablets and struggling computers play the filmed car instead, so they don't download any of it
+      var fine = matchMedia('(hover: hover) and (pointer: fine)').matches, slow = false, forced = null;
+      try { var sv = JSON.parse(localStorage.getItem('v8:slow')); slow = !!(sv && Date.now() - sv.at < 2592e5 && sv.level >= 1); } catch (e) {}
+      // ?quality=low|mid|high: see the site as that kind of machine does, for this visit (?quality=auto forgets it). See src/lib/device.js
+      try {
+        var qm = /[?&]quality=(low|mid|high|auto)\b/.exec(location.search);
+        if (qm && qm[1] === 'auto') sessionStorage.removeItem('v8:quality'); else if (qm) sessionStorage.setItem('v8:quality', qm[1]);
+        forced = sessionStorage.getItem('v8:quality');
+      } catch (e) {}
+      var still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var live = !still && !(navigator.connection && navigator.connection.saveData) && (forced ? forced !== 'low' : fine && !slow);
+      // a phone or tablet always plays its intro as a film, and then gets the live car if its graphics chip can draw it smoothly
+      // (phoneCar in src/lib/gpu.js); otherwise the filmed car
+      var phone = !still && !fine && !slow && !forced;
+      // and only on a graphics chip that can draw it smoothly (src/lib/gpu.js, pasted in below by vite.config.js). Without one, or with an
+      // older or phone-class chip, the computer plays the films instead, which were rendered from the very same scene
+      /*@gpuTier*/
+      var chip = '', tier = 'none';
+      if (live || phone) try {
+        var gc = document.createElement('canvas').getContext('webgl2', { failIfMajorPerformanceCaveat: true }), gi = gc && gc.getExtension('WEBGL_debug_renderer_info');
+        chip = gi ? String(gc.getParameter(gi.UNMASKED_RENDERER_WEBGL)) : '';
+        tier = !gc ? 'none' : forced || gpuTier(chip, navigator.hardwareConcurrency, navigator.deviceMemory, /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent));
+        if (gc && gc.getExtension('WEBGL_lose_context')) gc.getExtension('WEBGL_lose_context').loseContext();
+      } catch (e) { tier = 'none'; }
+      live = live && (tier === 'high' || tier === 'mid');
+      var phone3d = phone && tier !== 'none' && phoneCar(chip, navigator.deviceMemory);
+      window.__v8gpu = { chip: chip, tier: tier, forced: forced, live: live, phone3d: phone3d }; // src/pages/home.js and src/lib/rover3d.js go by this, rather than asking again
+      // where the 3D car will run, the page keeps its stage dark until the car is ready. The still is framed differently,
+      // so showing it first would look like the car jumping when the live one takes over
+      if (live) document.documentElement.classList.add('has-3d');
+      // what the start button waits for on a computer, asked for at once rather than after the 3D code has arrived
+      if (live && innerWidth >= 700) [['models/range-rover.glb', 'fetch'], ['models/sign.glb', 'fetch'], ['models/hall.webp', 'image'], ['models/floor.webp', 'image']].forEach(function (f) {
+        var l = document.createElement('link'); l.rel = 'preload'; l.href = f[0]; l.as = f[1]; l.crossOrigin = 'anonymous'; document.head.appendChild(l);
+      });
+      var nav = performance.getEntriesByType('navigation')[0], type = nav ? nav.type : 'navigate';
+      var fromSite = document.referrer && new URL(document.referrer).origin === location.origin;
+      var sent = sessionStorage.getItem('v8:restart'); // refreshed on another page, and sent here
+      sessionStorage.removeItem('v8:restart');
+      // the intro greets a new visitor; someone who saw it in the last twelve hours goes straight to the cars (a refresh still plays it)
+      var seen = false; try { seen = Date.now() - +localStorage.getItem('v8:intro-at') < 432e5; } catch (e) {}
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches && (sent || type === 'reload' || (type === 'navigate' && !fromSite && !seen))) {
+        try { localStorage.setItem('v8:intro-at', Date.now()); } catch (e) {}
+        document.documentElement.classList.add('play-intro');
+        if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+        scrollTo(0, 0);
+        // the intro's own sound and engine, asked for at once on a computer (a phone plays its film instead, a tablet only needs the sound)
+        // (the two engine models only after the page's own code, which has to arrive first for the button to work)
+        if (innerWidth >= 700) (live ? ['media/intro/engine.mp3', 'models/engine.glb', 'models/bay.glb'] : ['media/intro/engine.mp3']).forEach(function (f, i) {
+          var l = document.createElement('link'); l.rel = 'preload'; l.as = 'fetch'; l.href = f; l.crossOrigin = 'anonymous'; if (i) l.fetchPriority = 'low'; document.head.appendChild(l);
+        });
+        // every device without the live car plays the intro as a film, which the start button waits for: it is asked for at once,
+        // while the page is still arriving (src/pages/home.js picks the same file: FILMS and prepareFilm)
+        if (!live && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          var fv = document.createElement('video').canPlayType('video/mp4; codecs="hvc1.1.6.L120.B0"') === 'probably', fl = document.createElement('link');
+          fl.rel = 'preload'; fl.as = 'fetch'; fl.crossOrigin = 'anonymous';
+          fl.href = 'media/intro/film' + (innerHeight > innerWidth ? '' : '-wide') + (fv ? '-hevc' : '') + '.mp4';
+          document.head.appendChild(fl);
+        }
+        // a press that comes before the page's code has arrived is kept, not lost: the intro starts from it when it can
+        document.addEventListener('click', function (e) {
+          var b = e.target.closest && e.target.closest('[data-ignite]');
+          if (b && !window.__v8press) { window.__v8press = performance.now(); b.parentNode.parentNode.classList.add('is-pressed'); }
+        }, true);
+      }
+      // back from another page: to the place you left, not the top of the page
+      if (type === 'back_forward' && sessionStorage.getItem('v8:home-at')) document.documentElement.classList.add('returning');
+    } catch (e) {}
+  </script>
+  <link rel="preload" as="image" href="images/gate/ignite-off.webp" fetchpriority="high" />
+  <link rel="preload" as="image" href="images/gate/ignite-ring.webp" fetchpriority="high" />
+  <link rel="preload" as="image" href="images/gate/ignite-text.webp" fetchpriority="high" />
+  <script type="module" src="/src/pages/home.js" blocking="render"></script>
+</head>
+<body class="page-home">
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <!--@nav:home-->
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <!-- Intro: one continuous shot, drawn live in 3D (src/lib/rover3d.js). The still is the same car, for reduced motion,
+           data saver, no WebGL, or while the model loads. -->
+      <div class="hero-media" data-hero-media>
+        <img class="hero-img" data-hero-img src="images/hero/range-rover.webp" width="1600" height="1280" fetchpriority="high" decoding="async" draggable="false"
+          alt="A white Range Rover with a red bow on its bonnet and its headlights on, at night" />
+        <canvas class="hero-canvas" data-hero-canvas aria-hidden="true"></canvas>
+        <div class="hero-dark" data-hero-dark aria-hidden="true"></div>
+        <span class="hero-flash" aria-hidden="true"></span>
+      </div>
+      <div class="hero-shade" aria-hidden="true"></div>
+      <h1 class="sr-only" id="hero-title">WebLuxe Cars: used cars in Phoenix, Mauritius</h1>
+      <div class="hero-moves" data-hero-moves role="group" aria-label="Make the car move" hidden>
+        <button type="button" data-move="spin">Spin it</button>
+        <button type="button" data-move="dance">Make it dance</button>
+        <button type="button" data-move="lights">Light show</button>
+      </div>
+      <div class="hero-pitch"><p>Used cars in Phoenix, checked and ready to drive.</p><a class="btn btn-primary" href="inventory.html">See all <!--@total--> cars</a><span>Prices from Rs <!--@from--></span></div>
+      <!-- intro only: letterbox, the V8 badge that flies into the menu bar, and controls while it plays -->
+      <div class="bars" data-bars aria-hidden="true"><span></span><span></span></div>
+      <div class="intro-badge" data-badge aria-hidden="true"><img src="images/brand/mark.png" width="364" height="343" alt="" /></div>
+      <div class="intro-controls" data-intro-controls hidden><button type="button" data-mute aria-pressed="false">Sound off</button><button type="button" data-intro-skip>Skip</button></div>
+
+      <!-- Intro gate: browsers only allow sound after a tap, so the intro starts with the car's start button -->
+      <div class="gate" data-gate>
+        <div class="ig-stage">
+          <span class="ig-halo" aria-hidden="true"></span>
+          <span class="ig-ripple" aria-hidden="true"></span><span class="ig-ripple" aria-hidden="true"></span><span class="ig-ripple" aria-hidden="true"></span>
+          <button type="button" class="ignition" data-ignite aria-label="Start the engine and enter the site">
+            <img class="ig-layer" src="images/gate/ignite-off.webp" width="1000" height="1000" alt="" draggable="false">
+            <img class="ig-layer ig-ring" src="images/gate/ignite-ring.webp" width="1000" height="1000" alt="" draggable="false">
+            <img class="ig-layer ig-text" src="images/gate/ignite-text.webp" width="1000" height="1000" alt="" draggable="false">
+          </button>
+          <p class="ig-note" data-gate-note aria-live="polite"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- the first thing under the car: find one, and what you get with it -->
+    <section class="start" aria-label="Find your car">
+      <div class="wrap start-wrap">
+        <div class="finder" role="search" aria-label="Search cars" data-finder>
+          <div class="finder-head">
+            <p class="finder-title"><svg viewBox="0 0 28 24" aria-hidden="true"><path d="M3 15v-3l2.4-5.2A2 2 0 0 1 7.2 5.6h7.5M3 15h9m-6 0v2.4M1 11h2M20.500 15a5.500 5.500 0 1 0-4-1.700"/><circle cx="19" cy="9" r="5"/><path d="m23 13 4 4"/></svg>Search cars</p>
+            <p class="finder-note"><a class="hero-all" href="inventory.html">See all <!--@total--> cars</a><span class="hero-from">Prices from <strong class="tabular-nums">Rs <!--@from--></strong></span></p>
+          </div>
+          <div class="finder-row">
+            <label class="finder-field"><span class="sr-only">Make</span><select name="make"><option value="">Choose make</option></select></label>
+            <label class="finder-field"><span class="sr-only">Model</span><select name="model"><option value="">Choose model</option></select></label>
+            <label class="finder-field"><span class="sr-only">Year</span><select name="year"><option value="">Choose year</option></select></label>
+            <a class="btn btn-primary finder-go" href="inventory.html" data-finder-go><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span data-finder-label>Search <!--@total--> cars</span></a>
+            <button type="button" class="finder-reset" data-finder-reset aria-label="Reset the search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.600-5.900L4 8.500M4 4v4.500h4.500"/></svg></button>
+          </div>
+          <script type="application/json" data-finder-data><!--@finder--></script>
+        </div>
+        <div class="home-head"><h2 class="home-h">Just arrived</h2><a class="hero-all" href="inventory.html">See all <!--@total--> cars</a></div>
+        <ul class="grid-cars home-cars" data-view="grid"><!--@latest--></ul>
+        <ul class="home-facts"><li>Buy, sell or exchange</li><li>Leasing arranged</li><li>Every car checked</li><li>New stock every week</li></ul>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Saturday and the footer share one screen -->
+  <div class="finale">
+    <section class="sellband" aria-labelledby="sell-title">
+      <div class="wrap sellband-inner">
+        <div class="sellband-copy">
+          <p class="eyebrow">Saturday deals</p>
+          <h2 class="section-title" id="sell-title">Best deals every <em>Saturday.</em></h2>
+          <a href="inventory.html" class="btn btn-white">See all the cars</a>
+        </div>
+        <!-- live: counts down to the next Saturday opening, or to closing while it's on -->
+        <div class="countdown" data-countdown>
+          <p class="countdown-label" data-cd-label>Next Saturday deals in</p>
+          <div class="countdown-units">
+            <span><b class="tabular-nums" data-cd="d">0</b><small data-cd-word="d">days</small></span>
+            <span><b class="tabular-nums" data-cd="h">00</b><small data-cd-word="h">hours</small></span>
+            <span><b class="tabular-nums" data-cd="m">00</b><small>min</small></span>
+            <span><b class="tabular-nums" data-cd="s">00</b><small>sec</small></span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!--@footer-->
+  </div>
+  <!--@tabbar:home-->
+</body>
+</html>

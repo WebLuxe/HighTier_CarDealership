@@ -1,0 +1,1232 @@
+import gsap from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { initLayout, reduced, $, $$, curtainOpen, stash } from '../lib/layout.js';
+import { wireCardActions } from '../lib/card.js';
+import { arrive } from '../lib/fx.js';
+import { saturdayDeals } from '../lib/hours.js';
+import { DARK, HERO } from '../lib/rover-shots.js';
+import { markSlow, gpuInfo } from '../lib/device.js';
+
+const ENGINE = new URL('media/intro/engine.mp3', document.baseURI).href;
+const NAVS = ['[data-nav]'];
+const GAIN = 0.8; // playback level (the recording itself is mastered quietly)
+/* The intro opens on the first flash of the high beams: everything before it in the film below is skipped, the sound with it.
+   Its numbers stay in the time of the whole film, so CUT is the only thing that says where it starts. */
+const CUT = 4.5;
+/* Every device that doesn't draw the 3D car live watches the intro as a film: phones, tablets, touch-screen laptops, and computers
+   without a graphics chip or that have struggled before. Nothing can be touched while it runs, so nothing is lost, and they all get
+   the same sharp picture with the sound, never a black screen. Both films were rendered from this same scene by scripts/film.mjs,
+   from CUT to the end, so they finish on the car's hero pose, where the filmed loop of the car (below) takes over.
+   Upright for an upright screen, wide for the rest. mark: where the logo forms in the picture. */
+const FILMS = {
+  tall: { src: 'media/intro/film.mp4', small: 'media/intro/film-hevc.mp4', w: 420, h: 910, mark: { x: 210.5, y: 372.9, w: 263 } },
+  wide: { src: 'media/intro/film-wide.mp4', small: 'media/intro/film-wide-hevc.mp4', w: 960, h: 540, mark: { x: 480, y: 195.1, w: 240 } },
+};
+const FILM = innerHeight > innerWidth ? FILMS.tall : FILMS.wide;
+
+/* The same devices don't draw the car live afterwards either: they play a short filmed loop of it (scripts/hero-loop.mjs), about
+   1 MB, which every device plays smoothly and which costs far less to download than the 3D car. */
+const LOOP = (k, hevc) => `media/hero/loop-${k}${hevc ? '-hevc' : ''}.mp4`;
+/** This computer's graphics chip and its tier (src/lib/gpu.js), as the page's first script found them (index.html). It already
+    weighed everything the live car needs: a mouse or trackpad, a real graphics chip that can draw it smoothly, and no struggles
+    remembered (src/lib/device.js). */
+const gpu = gpuInfo();
+
+const media = $('[data-hero-media]');
+const canvas = $('[data-hero-canvas]');
+const dark = $('[data-hero-dark]');
+
+const { lenis } = initLayout({ home: true });
+wireCardActions();
+startCountdown();
+initAccordion();
+
+const playIntro = document.documentElement.classList.contains('play-intro');
+if (playIntro) {
+  // a refresh always lands at the top of the home page, wherever you were
+  const top = () => { scrollTo(0, 0); lenis?.scrollTo(0, { immediate: true, force: true }); };
+  top();
+  addEventListener('load', () => { if (document.documentElement.classList.contains('play-intro')) top(); }, { once: true }); // not once the intro is over and you have moved on
+  lenis?.stop();
+}
+
+/* ================================================================== the car
+   The Range Rover is drawn live by src/lib/rover3d.js, which brings three.js with it, so it is loaded on its own and
+   never holds up the page. Everything here animates one object of numbers, `s`; that file draws what they say.
+   With reduced motion, no WebGL or a failed download, the still of the same car stays on screen. */
+const s = { ...(playIntro ? DARK : HERO) };
+if (import.meta.env.MODE === 'dbg') { window.__s = s; window.__gsap = gsap; }
+const capture = import.meta.env.MODE === 'dbg' && !!window.__capture; // rendering the films themselves: always the live car
+// reduced motion keeps the still photo. Data Saver doesn't: the intro is what the start button is for, and its film is about 2 MB
+const moving3d = !reduced;
+// the live 3D car: a computer whose graphics chip can draw it smoothly (above). Everything else plays the films of it
+const live3d = moving3d && (capture || gpu.live);
+// a phone or tablet whose graphics chip can draw it too (phoneCar in src/lib/gpu.js): the intro is still the film, and then the
+// live car takes over, to turn with a finger and do its tricks. One that can't keep up after all gets the filmed car (onTooSlow)
+const phone3d = moving3d && !live3d && !capture && !!gpu.phone3d;
+const useFilm = playIntro && moving3d && !live3d;
+const useLoop = moving3d && !live3d && !phone3d;
+const wantStage = live3d || phone3d;
+let stage = null, tooSlow = false, modelDone = 0, onModel = () => {};
+// the film is fetched first: it has to play without a pause, and the filmed loop of the car isn't needed until it ends
+let filmFetched = () => {};
+const filmFirst = useFilm ? new Promise((done) => { filmFetched = done; setTimeout(done, 20000); }) : null;
+const stageReady = !wantStage ? Promise.resolve(null) : Promise.resolve(filmFirst).then(() => import('../lib/rover3d.js'))
+  .then(({ createStage }) => createStage({
+    canvas, s, input: $('.hero'), tier: phone3d ? 'mid' : gpu.tier, forced: !!gpu.forced, strict: phone3d,
+    onProgress: (v) => { modelDone = v * 0.9; onModel(modelDone); }, // the last tenth is getting it ready to draw
+    withEngine: playIntro && !useFilm,
+    onTap: () => flashLights(0),
+    onSign: signBlink,
+    onTooSlow: () => { // this machine can't run the car: the filmed car takes over (the photo until it plays), and that is remembered
+      stage = null;
+      tooSlow = true;
+      moving?.kill();
+      markSlow(1);
+      document.documentElement.classList.remove('has-3d');
+      $('[data-hero-moves]')?.setAttribute('hidden', '');
+      $('[data-hero-hint]')?.setAttribute('hidden', '');
+      if (!useLoop && !reduced) heroLoop();
+    },
+  }))
+  .then((st) => {
+    stage = st;
+    modelDone = 1;
+    onModel(1);
+    gsap.ticker.add(() => st.draw());
+    return st;
+  })
+  .catch((e) => {
+    console.warn('3D car unavailable, showing the still', e);
+    document.documentElement.classList.remove('has-3d');
+    modelDone = 1; onModel(1);
+    if (phone3d) heroLoop(); // a phone that was to have the live car: the filmed one instead
+    return null;
+  });
+if (!wantStage) { modelDone = 1; document.documentElement.classList.remove('has-3d'); }
+// the loop comes in once the film (if there is one) has arrived, so the two never fight over a slow connection
+const loop = useLoop ? Promise.resolve(filmFirst).then(() => heroLoop({ hold: useFilm })) : Promise.resolve(null);
+
+/** The filmed car: upright or sideways to suit the screen, in the smaller format where the device plays it. Its first frame shows
+    at once as a picture (the poster) and the film plays on over it; it rests while it is scrolled out of sight. Held (not playing)
+    while the intro film runs on top of it: release() starts it from that first frame, the hero pose the film ends on, so the film
+    can fade straight into it. With it come its tricks and its turn (heroTricks). */
+function heroLoop({ hold = false } = {}) {
+  let held = hold;
+  const v = document.createElement('video');
+  v.className = 'hero-loop';
+  v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto'; v.disablePictureInPicture = true;
+  for (const a of ['muted', 'playsinline', 'loop']) v.setAttribute(a, '');
+  v.setAttribute('aria-hidden', 'true');
+  let hevc = v.canPlayType('video/mp4; codecs="hvc1.1.6.L120.B0"') === 'probably', want = '', markReady;
+  v.ready = new Promise((done) => { markReady = done; }); // it has its file (heroTricks downloads the rest after it)
+  const pick = () => {
+    const shape = innerHeight > innerWidth ? 'portrait' : 'landscape';
+    const url = new URL(LOOP(shape, hevc), document.baseURI).href;
+    if (want === url) return;
+    want = url;
+    // its first frame as a picture (37 KB): there at once, under the film as it starts, and all a phone too short of memory to
+    // play one more film shows, the car standing in its hall rather than nothing
+    v.poster = new URL(`media/hero/loop-${shape}.webp`, document.baseURI).href;
+    // held for the end of the intro: downloaded whole meanwhile, so it is there the moment the film ends, whatever the browser
+    // (some fetch nothing of a video that isn't playing yet). Otherwise it simply streams. A download that hasn't arrived by the
+    // end of the intro (one stalled connection was enough, on a real phone) isn't waited for: it streams then (release, below),
+    // and the download, when it comes, is let go
+    const use = (src) => { if (want !== url || (src !== url && !held && v.getAttribute('src'))) return; v.src = src; markReady(); if (!held) v.play().catch(() => {}); };
+    if (held) download(url).then((b) => use(URL.createObjectURL(b)), () => use(url));
+    else use(url);
+  };
+  v.addEventListener('playing', () => v.classList.add('is-on'), { once: true });
+  v.addEventListener('error', () => {
+    if (v.src.startsWith('blob:')) { v.src = want; if (!held) v.play().catch(() => {}); } // won't play it from memory: streamed instead
+    else if (hevc) { hevc = false; pick(); } // said it could, and couldn't: the file every phone plays (and from now on, sideways too)
+  });
+  canvas.after(v);
+  pick();
+  v.classList.add('is-on'); // its picture shows straight away, and the film plays on over it (they are the same frame)
+  matchMedia('(orientation: portrait)').addEventListener('change', pick);
+  let seen = true;
+  // (resting: a trick or the turn is on top of it, see heroTricks)
+  new IntersectionObserver(([e]) => { seen = e.isIntersecting; if (seen && !held && !v.resting) v.play().catch(() => {}); else v.pause(); }).observe(media);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && seen && !held && !v.resting) v.play().catch(() => {}); });
+  v.release = () => {
+    if (!held) return;
+    held = false;
+    if (!v.getAttribute('src')) { v.src = want; markReady(); } // its download hasn't arrived: streamed, rather than nothing on screen
+    v.style.transition = 'none';
+    v.classList.add('is-on');
+    v.currentTime = 0;
+    v.play().catch(() => {});
+  };
+  v.hevc = () => hevc;
+  if (!reduced) heroTricks(v);
+  return v;
+}
+
+/* ================================================================== the filmed car's tricks
+   Where the car is a film rather than drawn live, it does the same tricks and turns the same way, recorded off the very same scene
+   (scripts/trick-films.mjs). The three buttons each play theirs, starting on the hero pose. Each trick comes back to rest on that
+   pose before its camera starts the loop's sway, and right there, with the car standing still, the page hands over: that picture is
+   held on a canvas, the trick's film is let go of, and the loop starts from its first frame, the very same picture; the held one
+   goes the moment the loop shows its next frame. A phone shares out only a few video decoders, and the loop couldn't start again
+   while the finished trick still had one, so the picture stood still mid-sway: now whatever the wait is, it is spent on a car at
+   rest, where nobody can see it.
+   A sideways drag turns the car a full circle, coasting on when let go and staying turned, as the live car does. That turn is
+   pictures rather than a film: each angle is drawn straight from memory as the finger moves, which even a weak phone does at once
+   (seeking through a film there lagged well behind the finger). All of it downloads during the intro, straight after the loop,
+   so the buttons work the moment they show; one tapped before its film is here says so, and plays as soon as it arrives. */
+const TRICK_LEAD = 0.8; // each trick's last seconds are the loop's first (LEAD in scripts/trick-films.mjs): it hands over where they begin
+let memoryPlays = true; // does this browser play a film from memory? The intro film finds out first (filmReady)
+function heroTricks(loopVideo) {
+  const box = $('[data-hero-moves]'), hero = $('.hero');
+  if (!box || heroTricks.on) return;
+  heroTricks.on = true;
+  const shape = () => (innerHeight > innerWidth ? 'portrait' : 'landscape');
+  const file = (name) => new URL(`media/hero/${name}`, document.baseURI).href;
+  const film = (name, hevc = loopVideo.hevc()) => file(`${name}-${shape()}${hevc ? '-hevc' : ''}.mp4`);
+  // each trick downloaded whole and played from memory (mem), or streamed from its address (net) by a browser that won't play a
+  // film from memory: the first time one doesn't start from memory, they all stream from then on (memoryOk). Kept by address, so a
+  // phone that turns out not to play HEVC after all (the loop finds out, in heroLoop) gets the H.264 ones from then on
+  const got = {};
+  let memoryOk = memoryPlays;
+  const get = (name) => { const u = film(name); return (got[u] ||= download(u).then((b) => ({ mem: URL.createObjectURL(b), net: u }), () => ({ mem: null, net: u }))); };
+  const pick = (f) => (memoryOk && f.mem ? f.mem : f.net);
+
+  const layer = (tag, cls) => { const el = document.createElement(tag); el.className = cls; el.setAttribute('aria-hidden', 'true'); return el; };
+  const still = layer('canvas', 'hero-still'), trick = layer('video', 'hero-trick'), turn = layer('canvas', 'hero-turn');
+  trick.muted = true; trick.playsInline = true; trick.preload = 'auto'; trick.disablePictureInPicture = true;
+  for (const a of ['muted', 'playsinline']) trick.setAttribute(a, '');
+  loopVideo.after(still, trick, turn); // a held picture lies right on the loop, so a trick or the turn always covers it
+  let busy = false, angle = 0, turnedNow = false, spinV = 0;
+
+  // a canvas the size of the hero in device pixels (at most two to a CSS pixel), and a picture drawn on it cover-fitted, exactly as
+  // the films are (object-fit: cover), so whatever is drawn there lines up with them
+  const fit = (c) => { const r = c.getBoundingClientRect(), k = Math.min(devicePixelRatio || 1, 2); c.width = Math.round(r.width * k); c.height = Math.round(r.height * k); };
+  const cover = (c, pic, w, h) => { const sc = Math.max(c.width / w, c.height / h); c.getContext('2d').drawImage(pic, (c.width - w * sc) / 2, (c.height - h * sc) / 2, w * sc, h * sc); };
+  // a film done with lets go of its file, so a phone never holds more video decoders than it needs
+  const free = (v) => { v.removeAttribute('src'); v.load(); };
+
+  // the loop waits underneath, still, on its first frame: the hero pose, where every trick and the turn end
+  const rest = () => { loopVideo.resting = true; loopVideo.pause(); loopVideo.currentTime = 0; };
+  // and then moves again. What lies on top (the held picture, the turn) stays until the loop has really shown a new frame
+  let resumes = 0;
+  const resume = (top) => {
+    loopVideo.resting = false;
+    const mine = ++resumes;
+    let gone = false;
+    const off = () => { if (!gone && mine === resumes) { gone = true; top.classList.remove('is-on'); } };
+    // the browser says it has shown a new frame, or the loop's clock has moved past its first one, whichever comes first (Safari
+    // can report the frame half a second late, while the loop is long since moving underneath)
+    loopVideo.requestVideoFrameCallback?.(() => requestAnimationFrame(off));
+    const moved = () => { if (gone || mine !== resumes) return; if (!loopVideo.paused && loopVideo.currentTime > 0.04) requestAnimationFrame(off); else requestAnimationFrame(moved); };
+    requestAnimationFrame(moved);
+    const go = (n) => loopVideo.play().catch(() => { if (n < 4 && mine === resumes && !loopVideo.resting) setTimeout(() => go(n + 1), 250); });
+    go(0);
+    setTimeout(off, 4000); // never held longer than this, whatever the loop does
+  };
+
+  // ---- the three tricks
+  const play = (name, button) => {
+    if (busy || scrollY > 40 || document.documentElement.classList.contains('play-intro')) return;
+    busy = true;
+    const waiting = setTimeout(() => button?.classList.add('is-loading'), 120); // not here yet: the button says so
+    const done = () => { clearTimeout(waiting); button?.classList.remove('is-loading'); };
+    get(`trick-${name}`).then((f) => roll(name, f, pick(f), done));
+  };
+  // from memory, then streamed, then (an HEVC film) in H.264. One that can't play at all is let go of quietly, and the loop never
+  // stopped
+  const roll = (name, f, src, done) => {
+    let started = false, settled = false;
+    const next = () => {
+      if (started || settled) return;
+      settled = true;
+      trick.onplaying = trick.onerror = null;
+      if (src === f.mem) { memoryOk = false; roll(name, f, f.net, done); return; }
+      if (/-hevc\.mp4$/.test(src)) { const u = film(`trick-${name}`, false); roll(name, { mem: null, net: u }, u, done); return; }
+      free(trick); done(); busy = false;
+    };
+    trick.onerror = next;
+    trick.onplaying = () => {
+      started = true;
+      trick.onplaying = trick.onerror = null;
+      done();
+      trick.classList.add('is-on'); // a cut, straight onto its first frame
+      rest();
+      if (turnedNow) { turnedNow = false; angle = 0; turn.classList.remove('is-on'); }
+      // back at rest, just before its camera starts to sway: the hand over
+      const watch = () => {
+        if (!trick.ended && trick.currentTime < trick.duration - TRICK_LEAD - 0.02) { requestAnimationFrame(watch); return; }
+        fit(still);
+        cover(still, trick, trick.videoWidth, trick.videoHeight);
+        still.classList.add('is-on');
+        trick.classList.remove('is-on');
+        free(trick);
+        busy = false;
+        resume(still);
+      };
+      requestAnimationFrame(watch);
+    };
+    trick.src = src;
+    trick.play().catch(() => {});
+    setTimeout(next, src === f.mem ? 2000 : 8000); // not playing two seconds on from memory, or eight streamed: the next way
+  };
+
+  // ---- the turn: turn-<shape>.bin is every picture of it in one file (how many, where each starts, then the JPEGs), drawn on a
+  // canvas laid exactly where the loop is (the same cover-fit), a few decoded ahead of the finger and the last few kept
+  let pack = null;
+  const getPack = () => (got[`pack${shape()}`] ||= download(file(`turn-${shape()}.bin`)).then((b) => b.arrayBuffer()).then((buf) => {
+    const head = new DataView(buf), n = head.getUint32(0, true), at = (i) => head.getUint32(4 + 4 * i, true), base = 4 + 4 * (n + 1);
+    return { shape: shape(), n, pictures: Array.from({ length: n }, (_, i) => new Blob([new Uint8Array(buf, base + at(i), at(i + 1) - at(i))], { type: 'image/jpeg' })) };
+  }).catch(() => null));
+  const usePack = () => getPack().then((p) => { if (p && p.shape === shape()) pack = p; });
+  const decoded = new Map(); // picture number -> its decoded picture, the most recent dozen
+  const decode = (i) => {
+    let d = decoded.get(i);
+    if (d) { decoded.delete(i); decoded.set(i, d); return d; }
+    d = createImageBitmap(pack.pictures[i]);
+    decoded.set(i, d);
+    if (decoded.size > 12) { const [k, old] = decoded.entries().next().value; decoded.delete(k); old.then((b) => b.close?.(), () => {}); }
+    return d;
+  };
+  let want = -1;
+  const paint = (bmp) => cover(turn, bmp, bmp.width, bmp.height);
+  const showAngle = () => {
+    if (!pack) return;
+    const n = pack.n, i = ((Math.round((angle / (Math.PI * 2)) * n) % n) + n) % n;
+    if (i === want) return;
+    want = i;
+    decode(i).then((bmp) => { if (want === i) paint(bmp); }, () => {});
+    const dir = spinV < 0 ? -1 : 1;
+    for (let k = 1; k <= 3; k++) decode((i + dir * k + n) % n).catch(() => {});
+  };
+  const toTurn = () => {
+    if (turnedNow) return true;
+    if (!pack) return false; // not here yet: the car stays as it is
+    turnedNow = true;
+    fit(turn);
+    want = -1;
+    showAngle();
+    rest(); // the turn starts and ends on the hero pose, the loop's first frame
+    requestAnimationFrame(() => turn.classList.add('is-on'));
+    return true;
+  };
+  // back to facing you, the short way round, and only then the loop: never two cars on screen at once
+  let leaving = false, coast = 0;
+  const leaveTurn = (at = 0.45) => {
+    if (!turnedNow || leaving) return;
+    leaving = true;
+    cancelAnimationFrame(coast);
+    const home = Math.round(angle / (Math.PI * 2)) * Math.PI * 2;
+    gsap.to({ a: angle }, { a: home, duration: at, ease: 'sine.inOut', onUpdate() { angle = this.targets()[0].a; showAngle(); },
+      onComplete: () => { leaving = false; turnedNow = false; angle = 0; resume(turn); } });
+  };
+
+  // a sideways drag turns it, the way rover3d.js turns the live car (the same speed for the same finger), and it coasts on after
+  let dragging = false, x0 = 0, xs = 0, last = 0;
+  hero.addEventListener('pointerdown', (e) => {
+    if (busy || e.button || scrollY > 40 || e.target.closest?.('a, button, input, select, label, .gate')) return;
+    dragging = true; x0 = xs = e.clientX; spinV = 0; last = performance.now(); cancelAnimationFrame(coast);
+    if (!pack) usePack();
+  });
+  addEventListener('pointermove', (e) => {
+    if (!dragging || (!turnedNow && Math.abs(e.clientX - xs) < 8) || !toTurn()) return;
+    const now = performance.now(), a = ((e.clientX - x0) / Math.min(innerWidth, 900)) * Math.PI * 1.5;
+    x0 = e.clientX;
+    angle += a;
+    spinV = (a / Math.max(4, now - last)) * 16;
+    last = now;
+    showAngle();
+  }, { passive: true });
+  const release = () => {
+    if (!dragging) return;
+    dragging = false;
+    if (!turnedNow) return;
+    const step = () => { angle += spinV; spinV *= 0.94; showAngle(); if (Math.abs(spinV) > 0.0002) coast = requestAnimationFrame(step); };
+    coast = requestAnimationFrame(step);
+  };
+  addEventListener('pointerup', release);
+  addEventListener('pointercancel', release);
+  // scrolled on, it turns back to face you, as the live car does, and the loop carries on
+  addEventListener('scroll', () => { if (scrollY > 6 && turnedNow && !dragging) leaveTurn(); }, { passive: true });
+  // turned sideways (or back): the pictures in that shape
+  matchMedia('(orientation: portrait)').addEventListener('change', () => { if (turnedNow) leaveTurn(0.01); pack = null; usePack(); });
+
+  // everything during the intro, right after the loop (which comes first: it is on screen the moment the intro ends). The tricks
+  // first, they are what a visitor taps, then the turn
+  loopVideo.ready.then(() => ['trick-spin', 'trick-dance', 'trick-lights'].reduce((prev, name) => prev.then(() => get(name)), Promise.resolve())).then(usePack);
+
+  const start = () => {
+    box.hidden = false;
+    gsap.from(box.children, { opacity: 0, y: 10, duration: 0.7, delay: 0.6, stagger: 0.08, ease: 'expo.out', clearProps: 'opacity,transform' });
+    box.addEventListener('click', (e) => { const b = e.target.closest('[data-move]'); if (b) play(b.dataset.move, b); });
+    const away = () => box.classList.toggle('is-away', scrollY > 30);
+    addEventListener('scroll', away, { passive: true });
+    away();
+  };
+  if (document.documentElement.classList.contains('play-intro')) addEventListener('v8:intro-done', start, { once: true });
+  else start();
+}
+
+setupFinder();
+keepPlace();
+runIntro().then(async () => {
+  document.documentElement.classList.remove('play-intro');
+  lenis?.start();
+  if (!heroStarted) { await curtainOpen; heroIn(); }
+  flashLights();
+  showMoves();
+  watchHero();
+  lockSections();
+  ScrollTrigger.refresh();
+});
+
+/* ================================================================== back to where you were
+   People open a car, go back, and open the next one, so the Back button has to return them to the same spot. */
+function keepPlace() {
+  const KEY = 'v8:home-at', next = $('.start');
+  const top = () => next.getBoundingClientRect().top + scrollY;
+  // noted as you go: a page on its way out can no longer be measured reliably
+  let at = -1e6;
+  addEventListener('scroll', () => { at = scrollY - top(); }, { passive: true });
+  addEventListener('pagehide', () => {
+    if (at > -innerHeight * 0.25) stash(() => sessionStorage.setItem(KEY, Math.round(Math.max(0, at))));
+    else stash(() => sessionStorage.removeItem(KEY));
+  });
+  if (!document.documentElement.classList.contains('returning')) return;
+  const y = top() + (+stash(() => sessionStorage.getItem(KEY)) || 0);
+  if (lenis) { lenis.resize(); lenis.scrollTo(y, { immediate: true, force: true }); } else scrollTo({ top: y, behavior: 'instant' });
+  document.documentElement.classList.add('returned');
+}
+
+/* ================================================================== intro
+   Browsers only allow sound after a tap, so the intro opens on the car's start button, on the silver page.
+   Pressing it plays a real, healthy V8 (public/media/intro/engine.mp3: a starter crank, then a V8 catching,
+   idling smoothly and revving, CC0 recordings from Freesound). The picture runs on the audio clock, and the
+   body's roll and the camera shake follow the recording's loudness frame by frame. It starts at CUT; what comes before that
+   in the timeline only sets the scene up:
+     4.7s  first rev: one flash of the high beams, the camera pushes in
+     5.9s  big rev: the hall's lights run towards you, the car launches, tyres smoking
+     7.0s  it brakes right in front of you, nose down, and the camera swings out
+     6.3s  the WebLuxe Cars badge comes up in the light
+     7.2s  last rev: a shine runs across the badge, then it flies up into the menu bar */
+
+
+/** Fetch and decode the engine recording while the visitor looks at the start button. It is read as a
+    stream, so the loader can show how much has arrived. */
+function prepareSound(onProgress = () => {}) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) { onProgress(1); return null; }
+  const ctx = new AC(); // starts suspended until the tap
+  const buffer = fetch(ENGINE).then(async (r) => {
+    const total = +r.headers.get('content-length') || 0;
+    if (!r.body?.getReader || !total) { const b = await r.arrayBuffer(); onProgress(1); return b; }
+    const reader = r.body.getReader(), chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); got += value.length;
+      onProgress(Math.min(0.99, got / total));
+    }
+    const out = new Uint8Array(got);
+    let o = 0;
+    for (const c of chunks) { out.set(c, o); o += c.length; }
+    onProgress(1);
+    return out.buffer;
+  }).then((b) => new Promise((ok, bad) => ctx.decodeAudioData(b, ok, bad))).catch(() => { onProgress(1); return null; });
+  return { ctx, buffer };
+}
+
+/* ------------------------------------------------------------------ the loader
+   The start screen is the button and nothing else. While the scene loads, its ring fills with real progress (the 3D car
+   and the V8, the fonts and the engine recording, which is streamed). When everything is ready the lettering lights up
+   and rings of red light roll out from the button. Pressing it early is fine: the intro waits for the car. */
+
+function startLoader(gate) {
+  // weights: what you'd wait longest for weighs most
+  // a film plays as it arrives, so the button only waits until it can play right through
+  const parts = useFilm ? { fonts: [0, 0.1], audio: [0, 0.9] } : { model: [0, 0.7], fonts: [0, 0.05], audio: [0, 0.25] };
+  let target = 0, shown = 0, raf = 0, ready = false;
+  const set = (k, v) => { if (!parts[k]) return; parts[k][0] = Math.max(parts[k][0], Math.min(1, v)); target = Object.values(parts).reduce((a, [x, w]) => a + x * w, 0); };
+  set('model', modelDone);
+  onModel = (v) => set('model', v);
+  (document.fonts?.ready || Promise.resolve()).then(() => set('fonts', 1));
+
+
+  const finish = () => {
+    if (ready) return;
+    ready = true;
+    cancelAnimationFrame(raf);
+    gate.style.setProperty('--load', '1');
+    gate.classList.add('is-ready');
+  };
+  const note = $('[data-gate-note]', gate);
+  const tick = () => {
+    shown += (target - shown) * (reduced ? 1 : 0.1);
+    if (target > 0.999 && shown > 0.995) shown = 1;
+    gate.style.setProperty('--load', shown.toFixed(3));
+    // pressed before everything has arrived: say so, honestly, and how far along it is
+    if (note && gate.classList.contains('is-waiting')) note.textContent = `Warming up · ${Math.round(shown * 100)}%`;
+    if (shown >= 1) return finish();
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  setTimeout(finish, 25000); // never keep anyone waiting on a slow connection
+  return { audio: (v) => set('audio', v), stop: () => cancelAnimationFrame(raf) };
+}
+
+/** Loudness of the recording, 60 values a second, 0 (idle) to 1 (the biggest rev). */
+function envelope(buffer) {
+  if (!buffer) return null;
+  const d = buffer.getChannelData(0), hop = Math.round(buffer.sampleRate / 60), out = new Float32Array(Math.ceil(d.length / hop));
+  for (let i = 0; i < out.length; i++) {
+    let s = 0; const a = i * hop, b = Math.min(d.length, a + hop * 2);
+    for (let j = a; j < b; j++) s += d[j] * d[j];
+    const db = 10 * Math.log10(s / Math.max(1, b - a) + 1e-12);
+    out[i] = Math.min(1, Math.max(0, (db + 30) / 19)); // -30 dBFS (idle) .. -11 dBFS (peak)
+  }
+  return out;
+}
+
+/** The film for this screen, downloaded by the page itself while the visitor looks at the start button, then played from memory.
+    A browser fetches little or nothing of a video that isn't playing yet (an iPhone nothing at all, Edge on Android with Data Saver
+    on only its first second), so waiting for the video to load itself could last for ever: the button sat at "Warming up · 1%" and
+    the intro was skipped. A plain download has no such limits. Its progress fills the button's ring, the button lights up once it
+    is all here, and from then on nothing can stall the film (index.html asks for it before this code has even arrived).
+    Each way of playing it is tried in turn until one works: the smaller (HEVC) file where the device says it plays it, then the
+    one every phone plays; each from memory first, then streamed the usual way, for a browser that won't play a film from memory
+    or a download that fails. v.next() moves on to the next way: on an error, or from filmReady when one never starts. */
+function prepareFilm(onProgress = () => {}) {
+  const v = document.createElement('video');
+  const files = [...(v.canPlayType('video/mp4; codecs="hvc1.1.6.L120.B0"') === 'probably' ? [FILM.small] : []), FILM.src].map((f) => new URL(f, document.baseURI).href);
+  const ways = files.flatMap((url) => [{ url, whole: true }, { url, whole: false }]);
+  let at = -1;
+  v.className = 'hero-film';
+  v.playsInline = true;
+  v.muted = true;
+  v.preload = 'auto';
+  v.disablePictureInPicture = true;
+  v.setAttribute('playsinline', '');
+  v.setAttribute('aria-hidden', 'true');
+  dark.before(v);
+  // (not "part": a video element already has one, for styling)
+  v.got = 0; // how much of the file is here, 0..1
+  v.ready = false; // it has its file and can be played
+  v.next = () => {
+    if (++at >= ways.length) { v.ready = false; v.failed = true; onProgress(1); filmFetched(); return; }
+    const mine = at, { url, whole } = ways[at];
+    v.ready = false;
+    v.whole = whole;
+    v.moved = performance.now();
+    const use = (src) => { if (mine !== at) return; v.src = src; v.ready = true; v.askedAt = 0; onProgress(1); filmFetched(); };
+    if (!whole) return use(url);
+    v.got = 0;
+    download(url, (p) => { if (mine !== at) return; v.got = p; v.moved = performance.now(); onProgress(Math.min(0.99, p)); })
+      .then((blob) => use(URL.createObjectURL(blob)), () => { if (mine === at) v.next(); });
+  };
+  v.addEventListener('error', () => { if (v.ready) v.next(); });
+  v.next();
+  return v;
+}
+
+/** A whole file, read as it arrives so the start button can show how far along it is. */
+async function download(url, onProgress = () => {}) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${r.status} ${url}`);
+  const total = +r.headers.get('content-length') || 0;
+  if (!r.body?.getReader || !total) { const b = await r.blob(); onProgress(1); return b; }
+  const reader = r.body.getReader(), chunks = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    got += value.length;
+    onProgress(got / total);
+  }
+  return new Blob(chunks, { type: 'video/mp4' });
+}
+
+/** Plays the film with its sound if the browser allows it, and silently if it only allows that. Only a refusal counts as failing:
+    an interruption (a pause or a new file asked for meanwhile) is not one, nor a file this device can't decode, which is swapped
+    for the other one (prepareFilm). */
+function playFilm(v, sound) {
+  v.muted = !sound;
+  v.askedAt ||= performance.now(); // when this way of playing it was first asked to start (filmReady gives it a few seconds)
+  return v.play().then(() => true, (e) => {
+    if (e?.name === 'AbortError' || v.error) return false;
+    if (sound) return playFilm(v, false);
+    v.next(); // refused even silently: the next way of playing it (prepareFilm), and when there is none left, it has failed
+    return false;
+  });
+}
+
+/** After the tap: the start button stays, saying how far along the film is ("Warming up · 64%"), until all of it is here, and then
+    it plays. So the button never gives way to a black screen, and the film never stops half way. A way of playing it that doesn't
+    start (from memory within 3 seconds, streamed within 12), or a download that stalls for 15, gives way to the next (prepareFilm).
+    Resolves true once the picture really moves; false once every way has failed, or after a minute, and the page then comes up
+    without it. */
+function filmReady(v, gate) {
+  return new Promise((resolve) => {
+    const note = $('[data-gate-note]', gate);
+    const since = performance.now();
+    let done = false, asked = false;
+    const finish = (ok) => { if (done) return; done = true; clearInterval(timer); gate.classList.remove('is-waiting'); resolve(ok); };
+    const check = () => {
+      if (v.failed || performance.now() - since > 60000) return finish(false);
+      if (!v.paused && v.currentTime > 0.02 && v.readyState >= 2) { memoryPlays = v.src.startsWith('blob:'); return finish(true); }
+      if (v.ready) {
+        if (v.paused && !asked) { asked = true; playFilm(v, true).then(() => { asked = false; }); }
+        if (v.askedAt && performance.now() - v.askedAt > (v.whole ? 3000 : 12000)) v.next();
+        return;
+      }
+      gate.classList.add('is-waiting');
+      gate.style.setProperty('--load', v.got.toFixed(3));
+      if (note) note.textContent = `Warming up · ${Math.round(v.got * 100)}%`;
+      if (performance.now() - v.moved > 15000) v.next();
+    };
+    const timer = setInterval(check, 120);
+    check();
+  });
+}
+
+function waitForChoice(gate, film) {
+  return new Promise((resolve) => {
+    let done = false;
+    const pick = (v) => () => { if (done) return; done = true; removeEventListener('keydown', onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') pick('skip')(); };
+    // sound and picture have to be started by the tap itself. A film still on its way is started and stopped again inside the
+    // tap, which is what lets it start later, with its sound, without another tap (filmReady)
+    const startFilm = () => {
+      if (!film) return;
+      if (film.ready) { playFilm(film, true); return; }
+      film.muted = false;
+      film.play().catch(() => {});
+      film.pause();
+    };
+    const button = $('[data-ignite]', gate);
+    // the button answers the moment a finger or the mouse goes down, before the click has even finished
+    button.addEventListener('pointerdown', () => gate.classList.add('is-pressed'));
+    button.addEventListener('pointercancel', () => { if (!done) gate.classList.remove('is-pressed'); });
+    button.addEventListener('click', () => {
+      performance.mark('v8:press'); // for timing the press: see how long until the first frame of the intro
+      gate.classList.add('is-pressed');
+      if (!done && matchMedia('(pointer: coarse)').matches) navigator.vibrate?.(14); // a short buzz, like a real start button, where the phone can
+      if (!done) startFilm();
+      pick('sound')();
+    });
+    addEventListener('keydown', onKey);
+    button.focus({ preventScroll: true });
+    // pressed while this code was still on its way (the page keeps that press for us): carry on from it now
+    if (window.__v8press) { performance.mark('v8:press', { startTime: window.__v8press }); startFilm(); pick('sound')(); }
+  });
+}
+
+
+async function runIntro() {
+  if (!playIntro) return;
+  const gate = $('[data-gate]'), bars = $$('[data-bars] > span'), badge = $('[data-badge]');
+  const controls = $('[data-intro-controls]');
+  const loader = startLoader(gate);
+  const film = useFilm ? prepareFilm(loader.audio) : null;
+  const audio = film ? null : prepareSound(loader.audio);
+  const phone = innerWidth < 700;
+
+  gsap.set(badge, { opacity: 0 });
+  gsap.from(gate.children, { opacity: 0, y: 16, duration: 0.9, stagger: 0.1, ease: 'expo.out', delay: 0.2 });
+
+  // everything the intro needs, gathered while the button is on screen (the car, the recording, the fonts), so that a press
+  // has nothing left to do but start. The film doesn't wait for the car: it plays as it arrives
+  let allSet = false;
+  const needs = Promise.all([
+    audio ? Promise.race([audio.buffer, new Promise((r) => setTimeout(r, 10000))]) : null,
+    film ? null : Promise.race([stageReady, new Promise((r) => setTimeout(r, 25000))]),
+    document.fonts?.ready,
+  ]).then(([buffer]) => { allSet = true; return { buffer, env: envelope(buffer) }; });
+
+  const choice = await waitForChoice(gate, film);
+  // resume audio inside the tap itself (iOS and Safari require it)
+  if (choice === 'sound' && audio) audio.ctx.resume().catch(() => {}); // (refused if the page is left before it has started)
+
+  if (choice === 'skip') {
+    loader.stop();
+    // the browser's own animations keep time even on a struggling device, where the page's clock slows right down
+    await gate.animate([{ opacity: 1, scale: 1 }, { opacity: 0, scale: 0.96 }], { duration: 300, easing: 'ease-in', fill: 'forwards' }).finished.catch(() => {});
+    gate.remove();
+    audio?.ctx.close();
+    film?.remove();
+    filmFetched();
+    loop.then((v) => v?.release()); // skipped before the film: the filmed car straight away
+    if (stage) gsap.set(dark, { opacity: 0 });
+    stageReady.then((st) => { st?.dropEngine(); st?.dropBay(); }); // skipped: neither will be seen
+    await gsap.timeline()
+      .to(s, { ...HERO, duration: 1.1, ease: 'expo.inOut' }, 0)
+      .to(dark, { opacity: 0, duration: 0.9, ease: 'power2.inOut' }, 0)
+      .to(bars, { scaleY: 0, duration: 0.8, ease: 'expo.inOut' }, 0)
+      .to(NAVS, { opacity: 1, duration: 0.6 }, 0.4)
+      .add(heroIn, 0.45);
+    finishIntro();
+    return;
+  }
+
+  // pressed early: the button stays lit and its ring shows how much is left, and the film starts the moment it's all here
+  if (!allSet) gate.classList.add('is-waiting');
+  const { buffer, env } = await needs;
+  loader.stop();
+  // the film has to be really playing before the button gives way to it (filmReady). If it can't play at all, the page comes up
+  // without it, with the filmed car, as when the 3D car can't start
+  const filmOn = film ? await filmReady(film, gate) : false;
+  if (film && !filmOn) { film.pause(); film.remove(); }
+  // the button gives way to the film as it begins, rather than the film waiting for the button to go
+  // (the browser's own animation, as above: on a struggling device the button must still be gone in under half a second)
+  gate.animate([{ opacity: 1, scale: 1 }, { opacity: 0, scale: 1.03 }], { duration: 450, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: 'forwards' }).finished.then(() => gate.remove(), () => gate.remove());
+  const withSound = choice === 'sound' && (buffer || filmOn);
+  if (withSound) dispatchEvent(new Event('v8:sound-on'));
+  if (!withSound) audio?.ctx.close();
+  const full = stage || (filmOn && film); // the whole film, in 3D or as a video
+  if (!full) {
+    // nothing to show it with after all (the 3D car failed to start, or the film can't play): never a black screen with only the
+    // sound. The page comes up at once, with the filmed car where it can play
+    audio?.ctx.close();
+    if (useLoop) loop.then((v) => v?.release()); // it was being held back for the film's end
+    else if (moving3d) heroLoop();
+    await gsap.timeline()
+      .to(dark, { opacity: 0, duration: 0.9, ease: 'power2.inOut' }, 0)
+      .to(bars, { scaleY: 0, duration: 0.8, ease: 'expo.inOut' }, 0)
+      .to(NAVS, { opacity: 1, duration: 0.6 }, 0.4)
+      .add(heroIn, 0.45);
+    finishIntro();
+    return;
+  }
+  gsap.set(dark, { opacity: 0 }); // the scene is its own darkness
+  if (film) { s.off = true; gsap.set(bars, { display: 'none' }); } // the 3D car rests until the film hands over to it, and the film fills the screen from its first frame
+
+  // where the badge sits: in the sky above the car, then it flies into the menu bar
+  const placeBadge = () => {
+    const portrait = innerHeight > innerWidth * 1.25;
+    const size = portrait ? Math.min(innerWidth * 0.34, 150) : gsap.utils.clamp(130, 230, innerWidth * 0.14);
+    const cy = portrait ? innerHeight * 0.13 : innerHeight * 0.2;
+    gsap.set(badge, { width: size, left: innerWidth / 2 - size / 2, top: cy - size * 0.47 });
+  };
+  placeBadge();
+
+  // ---- the film. Numbers are metres and radians
+  const tl = gsap.timeline({ paused: true });
+  if (import.meta.env.MODE === 'dbg') window.__tl = tl;
+  const Z = DARK.carZ, tall = innerWidth / innerHeight < 0.8, near = (m) => (tall ? m * 1.55 : m); // a tall screen needs more room
+  const flash = (at, power) => tl.to(s, { keyframes: [{ high: power, duration: 0.09, ease: 'sine.out' }, { high: 0, duration: 0.85, ease: 'sine.inOut' }] }, at);
+
+  // the shots: close-ups cut together like a car film, each one a slow slide, while the engine settles into its idle.
+  // shot(az, el, dist, what it looks at, roll, lens)
+  const shot = (az, el, dist, tx, ty, tz, roll, lens) => ({ az, el, near: dist, tx, ty, tz, roll, lens });
+  const take = (at, duration, from, to, ease = 'none') => { tl.set(s, from, at).to(s, { ...to, duration, ease }, at); };
+  const CUTS = { wheel: 1.62, tail: 2.42, nose: 3.22, out: 3.62 };
+
+  // crank (0.3 to 0.85s): the blade slowly wakes with the starter
+  tl.to(s, { drl: 0.12, sweep: 0.62, duration: 0.55, ease: 'sine.inOut' }, 0.3)
+    .to(s, { keyframes: [{ jolt: 0.12, duration: 0.2, ease: 'sine.out' }, { jolt: 0, duration: 0.35, ease: 'sine.inOut' }] }, 0.3)
+    // 0.9s: it catches. The LEDs ignite, the body kicks and settles on its springs
+    .to(s, { keyframes: [{ jolt: 1, duration: 0.08, ease: 'power2.out' }, { jolt: 0, duration: 1.1, ease: 'elastic.out(1, 0.32)' }] }, 0.88)
+    .set(s, { drl: 1.35, pod: 1.3 }, 0.9)
+    .to(s, { sweep: 1.05, duration: 0.85, ease: 'sine.inOut' }, 0.9)
+    .to(s, { drl: 1, pod: 0.6, duration: 0.7, ease: 'sine.inOut' }, 1.75)
+    .to(s, { beam: 0.7, dust: 1, duration: 1.2, ease: 'sine.inOut' }, 0.95)
+    .to(s, { env: 0.07, key: 0.05, duration: 0.35, ease: 'sine.inOut' }, 0.95)
+    // the tail lamps fire on camera
+    .set(s, { red: 1.5 }, CUTS.tail + 0.1)
+    .to(s, { sweepR: 1.1, duration: 0.5, ease: 'sine.inOut' }, CUTS.tail + 0.1)
+    .to(s, { red: 0.8, duration: 0.8, ease: 'sine.inOut' }, CUTS.tail + 0.65)
+    .to(s, { env: 0.2, key: 0.18, duration: 0.5, ease: 'sine.inOut' }, CUTS.wheel - 0.3)
+    .to(s, { env: 0.06, key: 0.03, beam: 1, duration: 0.8, ease: 'sine.inOut' }, 3.9);
+  // the headlamp, drifting along its blade as the pods light
+  take(0, CUTS.wheel, DARK, { az: 0.74, el: 0.03, near: near(1.2), tx: 0.6, ty: 1, tz: Z + 2.2, roll: -0.015, lens: 28 }, 'sine.out');
+  // down at the front wheel, looking along the flank
+  take(CUTS.wheel, CUTS.tail - CUTS.wheel, shot(0.66, 0.01, near(2.5), 0.86, 0.52, Z + 1.0, 0.03, 26), { near: near(2.05), tz: Z + 0.72, ty: 0.48 });
+  // behind it, as the tail lamps come on
+  take(CUTS.tail, CUTS.nose - CUTS.tail, shot(2.58, 0.05, near(3.1), 0.42, 1.04, Z - 2.1, 0.02, 30), { az: 2.74, near: near(2.7), tx: 0.2 });
+  // the lettering across the nose, then straight back down the hall in one long pull, arriving on the first rev
+  take(CUTS.nose, CUTS.out - CUTS.nose, shot(0, 0.2, near(2.5), 0, 1.02, Z + 2.25, 0, 28), { near: near(2.3) });
+  tl.to(s, { el: 0.012, near: near(11.5), ty: 0.92, tz: Z, lens: 26, duration: 4.64 - CUTS.out, ease: 'power2.inOut' }, CUTS.out);
+  // 4.7s: first rev. One flash of the high beams, and the far end of the hall stirs
+  flash(4.66, 0.9);
+  tl.to(s, { keyframes: [{ hall: 0.16, duration: 0.3, ease: 'sine.out' }, { hall: 0.05, duration: 0.7, ease: 'sine.inOut' }] }, 4.68)
+    .to(s, { near: near(10.8), duration: 1, ease: 'sine.out' }, 4.66)
+    .to(s, { keyframes: [{ jolt: 0.7, duration: 0.1, ease: 'sine.out' }, { jolt: 0, duration: 0.7, ease: 'elastic.out(1, 0.4)' }] }, 4.66);
+  // 5.9s: the big rev. The lights run down the hall towards you and the car launches, squatting, tyres smoking
+  flash(5.86, 1);
+  tl.to(s, { hall: 1, duration: 1.15, ease: 'power1.inOut' }, 5.86)
+    .to(s, { env: 1, key: 1, duration: 1.3, ease: 'power2.in' }, 5.9)
+    .to(s, { beam: 1, duration: 0.3 }, 5.86)
+    .to(s, { carZ: 0, duration: 1.6, ease: 'power2.inOut' }, 5.92)
+    .to(s, { dive: -1, duration: 0.5, ease: 'sine.out' }, 5.92)
+    .to(s, { smoke: 1, duration: 2, ease: 'none' }, 5.95)
+    .to(s, { lens: 38, duration: 1.3, ease: 'sine.inOut' }, 5.92)
+    .to(bars, { scaleY: 0, duration: 1, ease: 'expo.inOut' }, 6)
+    .to(dark, { opacity: 0, duration: 2, ease: 'power2.inOut' }, 6.15) // only still there when the 3D car isn't
+    // it brakes right in front of you: the nose dips as it slows, and rocks back as it stops
+    .to(s, { keyframes: [{ dive: 1.3, duration: 0.5, ease: 'sine.inOut' }, { dive: 0, duration: 1.1, ease: 'back.out(2.2)' }] }, 6.86);
+
+  // 7.8s: facing you, it pops its bonnet. The V8 rises out of the bay, comes apart in the air, and the pieces fly together
+  // into the logo, which goes up into the menu bar. Without the 3D car, the badge simply comes up in the light
+  const E = 7.8, hero = full ? E + 4.75 : 7.2, gone = full ? E + 5.1 : 7.95;
+  // where the logo forms: in the live scene, or in the film, which is cropped to fill the screen
+  const markAt = () => {
+    if (!film) return stage?.markOnScreen();
+    const box = media.getBoundingClientRect(), k = Math.max(box.width / FILM.w, box.height / FILM.h);
+    return { x: box.left + box.width / 2 + (FILM.mark.x - FILM.w / 2) * k, y: box.top + box.height / 2 + (FILM.mark.y - FILM.h / 2) * k, w: FILM.mark.w * k };
+  };
+  if (full) {
+    tl.to(s, { near: tall ? near(6.4) : 6.9, el: 0.13, ty: 1.62, tz: 1, lens: 30, duration: 1.6, ease: 'sine.inOut' }, E - 0.55)
+      .to(s, { keyframes: [{ bonnet: 0.05, duration: 0.09, ease: 'power2.out' }, { bonnet: 0.035, duration: 0.14, ease: 'sine.in' }] }, E)
+      .to(s, { keyframes: [{ jolt: 0.4, duration: 0.06, ease: 'power2.out' }, { jolt: 0, duration: 0.5, ease: 'sine.out' }] }, E)
+      .to(s, { bonnet: 1, duration: 0.8, ease: 'power2.inOut' }, E + 0.28)
+      .to(s, { bayGlow: 1, duration: 0.8, ease: 'sine.in' }, E + 0.3)
+      .to(s, { hall: 0.62, beam: 0.3, duration: 0.8, ease: 'sine.inOut' }, E + 0.4)
+      .to(s, { eRise: 1, duration: 1, ease: 'power2.inOut' }, E + 1.05) // only once the bonnet is fully up
+      .to(s, { keyframes: [{ dive: -0.7, duration: 0.25, ease: 'power2.out' }, { dive: 0, duration: 0.9, ease: 'elastic.out(1, 0.4)' }] }, E + 1.05)
+      .to(s, { bayGlow: 0.5, duration: 1, ease: 'sine.inOut' }, E + 1.1)
+      // it revs up there, and shakes itself to pieces
+      .to(s, { eShake: 1, duration: 0.4, ease: 'power2.in' }, E + 1.85);
+    flash(E + 2.25, 0.9);
+    tl.to(s, { eBurst: 1, duration: 1.05, ease: 'none' }, E + 2.25)
+      .to(s, { hall: 0.4, bayGlow: 0, duration: 0.8, ease: 'sine.inOut' }, E + 2.3)
+      .to(s, { eForm: 1, duration: 1.15, ease: 'none' }, E + 2.95)
+      // the moment the pieces land the badge is there in their place, in a flash of light
+      .add(() => { const m = markAt(); if (m) gsap.set(badge, { width: m.w, left: m.x - m.w / 2, top: m.y - (m.w * 343) / 728 }); }, E + 3.8)
+      .fromTo(badge, { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, E + 3.98);
+    flash(E + 4, 1);
+    // the bonnet drops and the hall comes back up
+    tl.to(s, { bonnet: 0, duration: 0.5, ease: 'power2.in' }, E + 4.15)
+      .to(s, { keyframes: [{ jolt: 1, dive: 0.7, duration: 0.07, ease: 'power2.out' }, { jolt: 0, dive: 0, duration: 0.8, ease: 'elastic.out(1, 0.38)' }] }, E + 4.65)
+      .to(s, { hall: 1, duration: 0.7, ease: 'sine.inOut' }, E + 4.2)
+      .add(() => stage?.dropEngine(), E + 4.4);
+  } else {
+    tl.fromTo(badge, { opacity: 0, scale: 1.35 }, { opacity: 1, scale: 1, duration: 0.9, ease: 'expo.out' }, 6.3);
+  }
+  // and the camera swings out to the hero
+  tl.to(s, { frame: 1, az: HERO.az, el: HERO.el, tx: HERO.tx, ty: HERO.ty, tz: HERO.tz, duration: 1.65, ease: 'sine.inOut' }, hero)
+    .to(s, { beam: HERO.beam, red: HERO.red, drl: HERO.drl, pod: HERO.pod, dust: HERO.dust, duration: 1.5, ease: 'power2.inOut' }, hero + 0.1)
+    // a last pulse on the badge and of the lights
+    .to(badge, { keyframes: [{ scale: 1.08, duration: 0.08 }, { scale: 1, duration: 0.6, ease: 'power2.out' }] }, hero + 0.02)
+    .to(s, { keyframes: [{ high: 0.6, duration: 0.1, ease: 'sine.out' }, { high: 0, duration: 0.7, ease: 'sine.inOut' }] }, hero + 0.02)
+    .add(heroIn, gone - 0.15)
+    .add(() => flyBadge(), gone)
+    .to(NAVS, { opacity: 1, duration: 0.8, ease: 'power2.out' }, gone + 0.15)
+    .to({}, { duration: 0.01 }, gone + 0.95);
+  // on a phone the dock comes up where Sound and Skip are, so they leave first
+  if (innerWidth < 900) tl.to(controls, { opacity: 0, duration: 0.25 }, gone - 0.1);
+
+  // the badge flies to the logo in the menu bar and hands over to it
+  function flyBadge() {
+    const target = $('.nav .wordmark-mark').getBoundingClientRect();
+    const r = badge.getBoundingClientRect();
+    gsap.to(badge, {
+      x: target.left + target.width / 2 - (r.left + r.width / 2), y: target.top + target.height / 2 - (r.top + r.height / 2),
+      scale: target.width / r.width, duration: 0.9, ease: 'expo.inOut',
+      onComplete: () => gsap.to(badge, { opacity: 0, duration: 0.25 }),
+    });
+  }
+
+  // the body rocks and the camera trembles with the recording's loudness
+  const REV_AT = E + 1.6, REV_FROM = 5.2;
+  const react = (t) => {
+    if (!env || t < 0.85 || t > 12.2) { s.rev = 0; return; }
+    const at = stage && t > REV_AT ? t - REV_AT + REV_FROM : t; // the second rev, for the engine in the air
+    const fadeOut = t > 11 ? Math.max(0, 1 - (t - 11) / 1.1) : t > 7.5 && t < REV_AT ? Math.max(0.15, 1 - (t - 7.5) / 1.1) : 1;
+    s.rev = env[Math.min(env.length - 1, Math.floor(at * 60))] * fadeOut * (phone ? 0.8 : 1);
+  };
+
+  // controls while it plays: sound off, skip
+  controls.hidden = false;
+  gsap.from(controls, { opacity: 0, duration: 0.6, delay: 0.4 });
+  let skipped = false, vol = null;
+  $('[data-mute]', controls).hidden = !withSound;
+  if (film?.muted) { $('[data-mute]', controls).setAttribute('aria-pressed', 'true'); $('[data-mute]', controls).textContent = 'Sound on'; } // allowed to play, but only silently
+  $('[data-mute]', controls).addEventListener('click', (e) => {
+    if (!vol && !film) return;
+    const off = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+    e.currentTarget.setAttribute('aria-pressed', String(off));
+    e.currentTarget.textContent = off ? 'Sound on' : 'Sound off';
+    if (film) film.muted = off;
+    else vol.gain.setTargetAtTime(off ? 0 : GAIN, audio.ctx.currentTime, 0.08);
+  });
+  const skipNow = () => { skipped = true; };
+  $('[data-intro-skip]', controls).addEventListener('click', skipNow);
+  const onKey = (e) => { if (e.key === 'Escape') skipNow(); };
+  addEventListener('keydown', onKey);
+
+  // the film fades away to the live car, once the car is there to hand over to
+  let handed = false;
+  const handOver = () => {
+    if (handed || !film) return;
+    handed = true;
+    stageReady.then(() => {
+      s.off = false;
+      stage?.draw(true);
+      // the filmed loop starts where the film ends, on the car's hero pose
+      if (useLoop) loop.then((v) => v?.release());
+      gsap.to(film, { opacity: 0, duration: useLoop ? 0.6 : 0.36, ease: 'sine.inOut' }); // it plays on unseen: it is the clock and the sound
+    });
+  };
+  let filmT = -1, filmMoved = performance.now(), lastTick = filmMoved;
+  const carryOn = () => { filmMoved = performance.now(); if (!document.hidden && film && !film.ended && film.paused && !handed) film.play().catch(() => {}); };
+  if (film) document.addEventListener('visibilitychange', carryOn);
+
+  tl.time(CUT);
+  await new Promise((resolve) => {
+    let t0 = film ? 0 : performance.now() / 1000;
+    if (withSound && !film) {
+      const { ctx } = audio;
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      vol = ctx.createGain();
+      src.connect(vol).connect(ctx.destination);
+      t0 = ctx.currentTime + 0.05;
+      // it joins a recording already running, so it comes up quickly rather than clicking on
+      vol.gain.setValueAtTime(0, t0);
+      vol.gain.linearRampToValueAtTime(GAIN, t0 + 0.08);
+      src.start(t0, CUT);
+      // the engine revs again up in the air, then the clock keeps running after the recording has ended
+      if (stage) {
+        const again = ctx.createBufferSource();
+        again.buffer = buffer;
+        again.connect(vol);
+        again.start(t0 + REV_AT - CUT, REV_FROM);
+      }
+    }
+    const now = () => (film ? film.currentTime : withSound ? audio.ctx.currentTime : performance.now() / 1000);
+    const tick = () => {
+      // a film that stops for good (the connection dropped, it can't play after all) is not worth waiting for: ten seconds without
+      // moving on. A gap between ticks is a hidden tab, not a stall
+      if (film) {
+        const at = performance.now();
+        if (film.currentTime !== filmT || at - lastTick > 1000) { filmT = film.currentTime; filmMoved = at; }
+        lastTick = at;
+        if (film.failed || (!film.ended && at - filmMoved > 10000)) skipped = true;
+      }
+      if (skipped) {
+        gsap.ticker.remove(tick);
+        if (film) { film.pause(); handOver(); }
+        if (vol) vol.gain.setTargetAtTime(0, audio.ctx.currentTime, 0.15);
+        react(99);
+        gsap.to(tl, { time: tl.duration(), duration: 1.1, ease: 'power2.inOut', onComplete: resolve });
+        return;
+      }
+      // the picture follows the audio clock: if a frame drops, it catches up instead of drifting
+      let t = Math.max(0, now() - t0) + CUT;
+      if (import.meta.env.MODE === 'dbg' && window.__hold !== undefined) t = window.__hold;
+      if (film && (film.ended || t >= tl.duration() - 0.04)) t = tl.duration();
+      if (film && t >= tl.duration() - 0.3) handOver(); // the filmed loop takes over at the very end, on the hero pose
+      tl.time(Math.min(t, tl.duration()));
+      if (!performance.getEntriesByName('v8:intro').length) performance.mark('v8:intro');
+      react(t);
+      if (t >= tl.duration()) { gsap.ticker.remove(tick); resolve(); }
+    };
+    gsap.ticker.add(tick);
+  });
+  removeEventListener('keydown', onKey);
+  document.removeEventListener('visibilitychange', carryOn);
+  film?.pause();
+  stageReady.then(() => { if (film) { film.removeAttribute('src'); film.load(); film.remove(); } }); // not before the car has taken over, however late it arrives; its decoder let go of at once
+  gsap.to(controls, { opacity: 0, duration: 0.3, onComplete: () => controls.remove() });
+  if (withSound && !film) audio.ctx.close().catch(() => {});
+  stage?.dropEngine();
+  stage?.dropBay();
+  finishIntro();
+}
+
+function finishIntro() {
+  Object.assign(s, HERO);
+  gsap.set(NAVS, { clearProps: 'opacity' }); // never touch the nav's transform: it slides via CSS
+  $('[data-badge]')?.remove();
+  $('[data-bars]')?.remove();
+  $('[data-intro-controls]')?.remove();
+  dispatchEvent(new Event('v8:intro-done'));
+}
+
+/* ================================================================== the Range Rover flashes its lights at you
+   Once the home page is showing (after the intro, or on arriving from another page) the car gives a soft flash
+   of its high beams. Tap the car and it does it again. */
+let flashing = false;
+async function flashLights(delay = 0.7) {
+  if (reduced) return;
+  await stageReady;
+  if (!stage || flashing || moving || scrollY > 40 || document.documentElement.classList.contains('play-intro')) return;
+  flashing = true;
+  gsap.to(s, {
+    delay, onComplete: () => { flashing = false; },
+    keyframes: [{ high: 0.85, duration: 0.16, ease: 'sine.out' }, { high: 0, duration: 0.9, ease: 'sine.inOut' }],
+  });
+}
+
+/* ================================================================== the car's party tricks
+   Each one is a timeline on the same numbers the intro uses. Scrolling away settles the car straight back. */
+const PLAY = {
+  spin() {
+    const tl = gsap.timeline();
+    Object.assign(s, { skid: 0, spin: 0 });
+    tl.to(s, { rev: 1, lock: 0.62, dive: -1, pull: 0.2, duration: 0.3, ease: 'power2.out' }, 0)
+      .to(s, { burn: 1, duration: 0.3, ease: 'power1.in' }, 0.12)
+      .set(s, { skid: 1 }, 0.3)
+      .to(s, { spin: Math.PI * 2, duration: 2.3, ease: 'power2.inOut' }, 0.25)
+      .to(s, { lean: 1, dive: 0, duration: 0.5, ease: 'sine.out' }, 0.5)
+      .to(s, { high: 0.7, duration: 0.12, ease: 'none' }, 1.3)
+      .to(s, { high: 0, duration: 0.5, ease: 'sine.in' }, 1.42)
+      .to(s, { burn: 0, rev: 0, lock: 0, lean: 0, duration: 0.55, ease: 'sine.inOut' }, 2.0)
+      .to(s, { dive: 1, duration: 0.2, ease: 'power2.out' }, 2.4)
+      .to(s, { dive: 0, pull: 0, duration: 0.6, ease: 'sine.inOut' }, 2.6);
+    // light chases along the sign while the car goes round
+    tl.to(s, { waveAmp: 2.2, duration: 0.2, ease: 'none' }, 0.3)
+      .fromTo(s, { wave: -0.2 }, { wave: 1.2, duration: 0.6, repeat: 2, ease: 'none' }, 0.3)
+      .to(s, { waveAmp: 0, duration: 0.25, ease: 'none' }, 2.05);
+    return tl;
+  },
+  dance() {
+    const tl = gsap.timeline();
+    const beat = 0.34;
+    const steps = [{ nod: -1, hop: 0.07 }, { nod: 1, hop: 0.07 }, { nod: 0, lean: 1, hop: 0.05 }, { nod: 0, lean: -1, hop: 0.05 }, { nod: -1, lean: 0, hop: 0.09 }, { nod: 1, hop: 0.09 }];
+    steps.forEach((step, i) => {
+      tl.to(s, { ...step, duration: beat * 0.72, ease: 'power3.out' }, i * beat)
+        .to(s, { high: i % 2 ? 0 : 0.65, red: i % 2 ? 1 : 0.2, signRed: i % 2 ? -0.9 : 0.7, signWhite: i % 2 ? 0.7 : -0.9, duration: 0.05, ease: 'none' }, i * beat); // V8 and MOTORS trade places on the beat
+    });
+    const up = steps.length * beat;
+    tl.to(s, { nod: 0, lean: 0, hop: -0.1, high: 0, red: 0.55, signRed: 0, signWhite: 0, duration: 0.26, ease: 'power2.inOut' }, up)
+      .to(s, { signFlash: 1, duration: 0.07, ease: 'none' }, up + 0.9)
+      .to(s, { signFlash: 0, duration: 0.6, ease: 'sine.in' }, up + 0.97)
+      .to(s, { air: 0.62, hop: 0.05, pull: 0.1, rev: 1, duration: 0.34, ease: 'power2.out' }, up + 0.26)
+      .to(s, { air: 0, duration: 0.3, ease: 'power2.in' }, up + 0.6)
+      .to(s, { hop: -0.09, dive: 1, jolt: 1, rev: 0, duration: 0.08, ease: 'power2.out' }, up + 0.9)
+      .to(s, { hop: 0, dive: 0, jolt: 0, pull: 0, duration: 0.9, ease: 'elastic.out(1, 0.4)' }, up + 0.98);
+    return tl;
+  },
+  lights() {
+    const tl = gsap.timeline();
+    tl.to(s, { hall: 0.1, key: 0.35, drl: 0, pod: 0, red: 0, beam: 0, duration: 0.45, ease: 'sine.inOut' }, 0)
+      .set(s, { sweep: 0.3, sweepR: 0.2 }, 0.45)
+      .to(s, { drl: 1.4, pod: 1, red: 1, duration: 0.05 }, 0.55)
+      .to(s, { sweep: 2, sweepR: 2, duration: 0.8, ease: 'power2.out' }, 0.55);
+    // alone in the dark hall, the sign answers the car: light runs along it, then it strobes with the high beams
+    tl.set(s, { sign: 1, waveAmp: 2.6, signWhite: -0.8, signRed: -0.8 }, 0.6)
+      .fromTo(s, { wave: -0.2 }, { wave: 1.2, duration: 0.75, ease: 'sine.inOut' }, 0.6)
+      .to(s, { signWhite: 0, signRed: 0, waveAmp: 0, duration: 0.3, ease: 'none' }, 1.15);
+    [1.45, 1.65, 1.85, 2.05].forEach((at, i) => {
+      tl.to(s, { high: 1, red: i % 2 ? 0.2 : 1, signFlash: 1, signRed: i % 2 ? -0.9 : 0.4, signWhite: i % 2 ? 0.4 : -0.9, duration: 0.05, ease: 'none' }, at).to(s, { high: 0, red: i % 2 ? 1 : 0.2, signFlash: 0, duration: 0.13, ease: 'sine.in' }, at + 0.05);
+    });
+    tl.set(s, { signRed: 0, signWhite: 0 }, 2.25).to(s, { sign: 0, duration: 0.6, ease: 'none' }, 2.95);
+    tl.to(s, { beam: 1, high: 0.5, duration: 0.2, ease: 'power2.out' }, 2.3)
+      .to(s, { hall: 1, key: 1, beam: 0.3, high: 0, drl: 1, pod: 0.3, red: 0.55, duration: 0.9, ease: 'sine.inOut' }, 2.55);
+    return tl;
+  },
+};
+if (import.meta.env.MODE === 'dbg') window.__play = PLAY; // scripts/trick-films.mjs records each of them for the phones that play films
+let moving = null, stopStunt = () => {}, signBusy = false;
+async function stunt(name) {
+  if (reduced) return;
+  await stageReady;
+  if (!stage || moving || scrollY > 40 || document.documentElement.classList.contains('play-intro')) return;
+  const rest = { rev: 0, lock: 0, burn: 0, dive: 0, nod: 0, lean: 0, hop: 0, air: 0, pull: 0, jolt: 0, high: 0, red: 0.55, hall: 1, key: 1, drl: 1, pod: 0.3, beam: 0.3, sweep: 2, sweepR: 2, sign: 0, signRed: 0, signWhite: 0, signFlash: 0, waveAmp: 0 };
+  const end = () => { moving = null; removeEventListener('scroll', bail); };
+  const bail = () => {
+    if (scrollY < 60) return;
+    moving?.kill();
+    end();
+    gsap.to(s, { ...rest, spin: Math.round(s.spin / (Math.PI * 2)) * Math.PI * 2, skid: 0, duration: 0.3, ease: 'sine.out', onComplete: () => { s.spin = 0; } });
+  };
+  addEventListener('scroll', bail, { passive: true });
+  stopStunt = () => { moving?.kill(); end(); };
+  moving = PLAY[name]();
+  moving.eventCallback('onComplete', () => {
+    end();
+    if (name === 'spin') { s.spin = 0; s.turnDone = 1; gsap.fromTo(s, { skid: 1 }, { skid: 0, duration: 7, ease: 'sine.in' }); }
+  });
+}
+
+/* ================================================================== the search in the hero
+   Make narrows the models, model narrows the years, and the button always says how many cars it will show. It is a real
+   link to the inventory with the filters in the address, so the page transition and the back button work as usual. */
+function setupFinder() {
+  const box = $('[data-finder]');
+  if (!box) return;
+  const cars = JSON.parse($('[data-finder-data]', box).textContent);
+  const [make, model, year] = ['make', 'model', 'year'].map((n) => $(`[name="${n}"]`, box));
+  const go = $('[data-finder-go]', box), label = $('[data-finder-label]', box);
+  const fill = (sel, values, head) => {
+    const keep = sel.value;
+    sel.replaceChildren(new Option(head, ''), ...values.map((v) => new Option(v, v)));
+    sel.value = values.map(String).includes(keep) ? keep : '';
+  };
+  const update = () => {
+    fill(make, [...new Set(cars.map((c) => c[0]))].sort(), 'Choose make');
+    const byMake = cars.filter((c) => !make.value || c[0] === make.value);
+    fill(model, [...new Set(byMake.map((c) => c[1]))].sort(), 'Choose model');
+    const byModel = byMake.filter((c) => !model.value || c[1] === model.value);
+    fill(year, [...new Set(byModel.map((c) => c[2]))].sort((a, b) => b - a), 'Choose year');
+    const hits = byModel.filter((c) => !year.value || String(c[2]) === year.value).length;
+    const q = new URLSearchParams();
+    if (make.value) q.set('make', make.value);
+    if (model.value) q.set('q', model.value);
+    if (year.value) q.set('year', `${year.value}-${year.value}`);
+    go.href = q.size ? `inventory.html?${q}` : 'inventory.html';
+    label.textContent = `Search ${hits} car${hits === 1 ? '' : 's'}`;
+  };
+  box.addEventListener('change', update);
+  $('[data-finder-reset]', box).addEventListener('click', () => {
+    make.value = model.value = year.value = '';
+    update();
+  });
+  update();
+}
+
+/** Click the wall sign: it blinks at you, light runs along it, and the car flashes back. */
+function signBlink() {
+  if (moving || signBusy) return;
+  signBusy = true;
+  const tl = gsap.timeline({ onComplete: () => { signBusy = false; } });
+  [0, 0.13, 0.26].forEach((at) => {
+    tl.to(s, { sign: 0, signWhite: -1, signRed: -1, duration: 0.03, ease: 'none' }, at).to(s, { signWhite: 0, signRed: 0, signFlash: 0.8, duration: 0.03, ease: 'none' }, at + 0.07);
+  });
+  tl.to(s, { signFlash: 0, duration: 0.5, ease: 'sine.in' }, 0.34)
+    .set(s, { waveAmp: 2.4 }, 0.42)
+    .fromTo(s, { wave: -0.2 }, { wave: 1.2, duration: 0.7, ease: 'sine.inOut' }, 0.42)
+    .to(s, { waveAmp: 0, duration: 0.2, ease: 'none' }, 1);
+  flashLights(0.5);
+}
+
+function showMoves() {
+  const box = $('[data-hero-moves]');
+  if (!box) return;
+  stageReady.then((st) => {
+    if (!st || tooSlow) return;
+    box.hidden = false;
+    gsap.from(box.children, { opacity: 0, y: 10, duration: 0.7, delay: 1.6, stagger: 0.08, ease: 'expo.out', clearProps: 'opacity,transform' });
+    box.addEventListener('click', (e) => { const b = e.target.closest('[data-move]'); if (b) stunt(b.dataset.move); });
+    // the tricks only work at the top of the page, so the buttons leave as soon as the drive starts
+    const away = () => box.classList.toggle('is-away', scrollY > 30);
+    addEventListener('scroll', away, { passive: true });
+    away();
+  });
+}
+
+/* ================================================================== the hero is only the car */
+let heroStarted = false;
+function heroIn() {
+  heroStarted = true;
+  gsap.to('.hero-shade', { opacity: 1, duration: reduced ? 0 : 1.2, ease: 'power2.out' });
+}
+
+/** The 3D scene only draws while it can be seen. With the hero filling the screen, nothing behind it needs drawing either. */
+function watchHero() {
+  const hero = $('.hero'), root = document.documentElement;
+  new IntersectionObserver(([e]) => { s.off = !e.isIntersecting; }).observe(hero);
+  const covered = () => root.classList.toggle('hero-cover', scrollY < 2);
+  addEventListener('scroll', covered, { passive: true });
+  covered();
+}
+
+/* ================================================================== mouse lock
+   With a mouse the home page is a stack of screens, and one flick of the wheel moves exactly one of them: nothing is ever left
+   half way. The arrow keys, Page Up, Page Down and the space bar do the same. Touch screens scroll as usual. The menu bar stays
+   until the last screen, Saturday, which fills the window. */
+function lockSections() {
+  if (!lenis) return;
+  const root = document.documentElement, nav = $('[data-nav]'), screens = $$('.hero, .start, .finale'), last = screens.length - 1;
+  root.classList.add('locked');
+  const stops = () => { const end = root.scrollHeight - innerHeight; return screens.map((el) => Math.min(end, el.offsetTop)); };
+  const nearest = () => { const list = stops(); return list.reduce((best, y, i) => (Math.abs(y - scrollY) < Math.abs(list[best] - scrollY) ? i : best), 0); };
+  let at = nearest(), busy = false, lastWheel = 0, doneAt = 0, safety = 0, idle = 0;
+  nav?.classList.toggle('is-hidden', at === last); // Back can land you straight on the last screen
+  const go = (i) => {
+    i = Math.max(0, Math.min(last, i));
+    if (i === at || busy) return;
+    busy = true;
+    at = i;
+    nav?.classList.toggle('is-hidden', i === last);
+    clearTimeout(safety);
+    safety = setTimeout(() => { busy = false; }, 1600); // never stuck, whatever happens to the tab meanwhile
+    arrive(screens[i], 380); // hidden from this moment, and landing with the screen
+    lenis.scrollTo(stops()[i], {
+      duration: 1, lock: true, force: true,
+      easing: (t) => (1 - Math.cos(Math.PI * t)) / 2,
+      onComplete: () => { busy = false; clearTimeout(safety); doneAt = performance.now(); },
+    });
+  };
+  addEventListener('wheel', (e) => {
+    if (e.ctrlKey || !e.deltaY) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const now = performance.now(), gap = now - lastWheel;
+    lastWheel = now;
+    if (busy || (gap < 140 && now - doneAt < 350)) return; // the tail of the same flick
+    go(at + Math.sign(e.deltaY));
+  }, { passive: false, capture: true });
+  addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.altKey || e.metaKey || e.target.closest?.('input, select, textarea')) return;
+    const typing = e.target.closest?.('a, button');
+    const step = { ArrowDown: 1, PageDown: 1, ArrowUp: -1, PageUp: -1 }[e.key] ?? (e.key === ' ' && !typing ? (e.shiftKey ? -1 : 1) : 0);
+    const to = e.key === 'Home' ? 0 : e.key === 'End' ? last : null;
+    if (!step && to === null) return;
+    e.preventDefault();
+    go(to ?? at + step);
+  });
+  // if the page ends up somewhere else (Tab, Find, a jump from another page), the screen counted is the one you are on
+  addEventListener('scroll', () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => {
+      if (busy) return;
+      const n = nearest();
+      if (n !== at) { at = n; nav?.classList.toggle('is-hidden', n === last); }
+    }, 200);
+  }, { passive: true });
+  // a resized window keeps you on the screen you were on (after the page has measured itself again)
+  addEventListener('resize', () => { lenis.resize?.(); requestAnimationFrame(() => lenis.scrollTo(stops()[at], { immediate: true, force: true })); }, { passive: true });
+}
+
+/* ================================================================== what you get: pointing at a panel opens it, a tap does on a touch screen */
+function initAccordion() {
+  const box = $('[data-acc]');
+  if (!box) return;
+  const items = $$('.acc-item', box);
+  const open = (item) => {
+    if (item.classList.contains('is-open')) return;
+    items.forEach((x) => {
+      const on = x === item;
+      x.classList.toggle('is-open', on);
+      $('.acc-btn', x).setAttribute('aria-expanded', String(on));
+    });
+  };
+  let waiting = 0;
+  items.forEach((item) => {
+    // a moment's pause, so a mouse crossing the row doesn't flick each one open on its way past
+    item.addEventListener('pointerenter', (e) => { if (e.pointerType !== 'mouse') return; clearTimeout(waiting); waiting = setTimeout(() => open(item), 70); });
+    item.addEventListener('pointerleave', () => clearTimeout(waiting));
+    $('.acc-btn', item).addEventListener('click', () => open(item));
+    $('.acc-btn', item).addEventListener('focus', () => open(item));
+  });
+}
+
+/* ================================================================== Saturday countdown
+   Counts down to the next Saturday opening, or, while the deals are on, to closing time. Every second it reads the real
+   clock again, so it can't drift, and it never stops: a timer that has to be noticed to run is a timer that looks broken. */
+function startCountdown() {
+  const box = $('[data-countdown]');
+  if (!box) return;
+  const label = $('[data-cd-label]', box);
+  const set = (k, v) => { $(`[data-cd="${k}"]`, box).textContent = v; };
+  const pad = (n) => String(n).padStart(2, '0');
+  const tick = () => {
+    const { on, ms } = saturdayDeals();
+    const left = Math.max(0, Math.floor(ms / 1000)), d = Math.floor(left / 86400), h = Math.floor((left % 86400) / 3600);
+    box.classList.toggle('is-on', on);
+    label.textContent = on ? 'Saturday deals are on now. They end in' : 'The next Saturday deals start in';
+    set('d', d);
+    set('h', pad(h));
+    set('m', pad(Math.floor((left % 3600) / 60)));
+    set('s', pad(left % 60));
+    $('[data-cd-word="d"]', box).textContent = d === 1 ? 'day' : 'days';
+    $('[data-cd-word="h"]', box).textContent = h === 1 ? 'hour' : 'hours';
+  };
+  tick();
+  // on the second, every second
+  const next = () => setTimeout(() => { tick(); next(); }, 1000 - (Date.now() % 1000) + 5);
+  next();
+}
