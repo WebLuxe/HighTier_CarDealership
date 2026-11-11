@@ -1,0 +1,35 @@
+# WebLuxe Cars
+
+> Used car dealer at 24 Royal Road, Phoenix, Mauritius. Buy, sell or exchange a car; leasing through Sample Leasing Co. Prices are in Mauritian rupees.
+
+- Phone: 5123 4567
+- WhatsApp: https://wa.me/0
+- Email: sales@webluxecars.mu
+- Opening hours: Monday to Friday 9:00 to 17:00, Saturday 9:00 to 16:00, closed Sunday
+
+## Pages
+
+- [Catalogue](https://webluxe.github.io/V8-Motors/inventory.html): every car in stock, filterable by body, price, year, fuel and gearbox
+- [Sell](https://webluxe.github.io/V8-Motors/sell.html): rough guide price and an offer for your car, or put it towards one of ours
+- [Leasing](https://webluxe.github.io/V8-Motors/finance.html): monthly payment calculator; leasing is arranged through Sample Leasing Co
+- [Visit us](https://webluxe.github.io/V8-Motors/contact.html): address, opening hours and how to reach us
+- [Privacy policy](https://webluxe.github.io/V8-Motors/privacy.html)
+- [Terms of sale](https://webluxe.github.io/V8-Motors/terms.html)
+
+## Cars in stock
+
+- [2024 Hyundai Tucson](https://webluxe.github.io/V8-Motors/cars/2024-hyundai-tucson.html): Rs 1,890,000, 1.6 L turbo hybrid, dark grey SUV, Automatic, 9,000 km
+- [2025 Ford Ranger](https://webluxe.github.io/V8-Motors/cars/2025-ford-ranger.html): Rs 2,150,000, 2.0 L bi-turbo diesel, light blue pickup, Automatic, 4,500 km
+- [2021 Opel Corsa](https://webluxe.github.io/V8-Motors/cars/2021-opel-corsa.html): Rs 745,000, 1.2 L turbo petrol, orange hatchback, Automatic, 24,000 km
+- [2020 Honda Civic](https://webluxe.github.io/V8-Motors/cars/2020-honda-civic.html): Rs 895,000, 1.5 L turbo petrol, red hatchback, Automatic, 41,000 km
+- [2014 Suzuki Swift](https://webluxe.github.io/V8-Motors/cars/2014-suzuki-swift.html): Rs 395,000, 1.6 L petrol, white hatchback, Manual, 92,000 km
+- [2021 Opel Mokka](https://webluxe.github.io/V8-Motors/cars/2021-opel-mokka.html): Rs 1,095,000, 1.2 L turbo petrol, green SUV, Automatic, 31,000 km
+- [2020 Toyota Corolla](https://webluxe.github.io/V8-Motors/cars/2020-toyota-corolla.html): Rs 925,000, 1.8 L hybrid, white sedan, Automatic, 52,000 km
+- [2021 Volkswagen Golf](https://webluxe.github.io/V8-Motors/cars/2021-volkswagen-golf.html): Rs 1,650,000, 2.0 L turbo petrol, white hatchback, Automatic, 28,000 km
+- [2021 Toyota Hilux](https://webluxe.github.io/V8-Motors/cars/2021-toyota-hilux.html): Rs 1,490,000, 2.4 L diesel, white pickup, Manual, 63,000 km
+- [2017 Mercedes-Benz C-Class](https://webluxe.github.io/V8-Motors/cars/2017-mercedes-benz-c-class.html): Rs 1,450,000, 1.6 L turbo petrol, dark green sedan, Automatic, 74,000 km
+- [2017 Volkswagen Polo](https://webluxe.github.io/V8-Motors/cars/2017-volkswagen-polo.html): Rs 495,000, 1.2 L turbo petrol, red hatchback, Automatic, 68,000 km
+- [2020 Suzuki Jimny](https://webluxe.github.io/V8-Motors/cars/2020-suzuki-jimny.html): Rs 1,150,000, 1.5 L petrol, yellow SUV, Manual, 38,000 km
+- [2020 Jaguar I-PACE](https://webluxe.github.io/V8-Motors/cars/2020-jaguar-i-pace.html): Rs 2,350,000, 90 kWh electric, silver SUV, Automatic, 45,000 km
+- [2024 Ford Transit Connect](https://webluxe.github.io/V8-Motors/cars/2024-ford-transit-connect.html): Rs 1,250,000, 1.5 L diesel, dark grey van, Manual, 12,000 km
+- [2014 Toyota Avalon](https://webluxe.github.io/V8-Motors/cars/2014-toyota-avalon.html): Rs 675,000, 2.5 L hybrid, silver sedan, Automatic, 110,000 km
